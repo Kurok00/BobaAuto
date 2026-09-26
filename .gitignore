@@ -1,0 +1,8 @@
+# các bản .txt cũ chỉ để tham khảo, không theo dõi trong git
+Auto Tiem Tra Nho - Tampermonkey *.txt
+
+# dev
+.vscode/
+*.log
+Thumbs.db
+desktop.ini

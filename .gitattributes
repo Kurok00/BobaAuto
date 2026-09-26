@@ -1,0 +1,4 @@
+# userscript phải dùng LF, tránh CRLF lẫn vào khi serve từ raw.githubusercontent
+* text=auto eol=lf
+*.user.js text eol=lf
+*.yml text eol=lf
