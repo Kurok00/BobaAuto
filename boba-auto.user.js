@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho - Tampermonkey Final
 // @namespace    http://tampermonkey.net/
-// @version      2026.09.26.1500
-// @description  Tự quy hoạch kho theo nhu cầu khách, cắt giảm khi vượt ví, chặn lỗi 999999k
+// @version      2026.09.26.1530
+// @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
 // @match        https://trongnhi.trongnhi110266.workers.dev/*
@@ -18,17 +18,28 @@
     'use strict';
 
     var CFG = {
-        fallbackBudget: 50,      // ngân sách (k) khi không đọc được #hMoney
-        clickDelay: 40,          // ms giữa 2 lần bấm
-        tabDelay: 320,           // ms đợi carousel chuyển xong
-        maxReduceRounds: 60,     // trần vòng cắt giảm cho 1 lượt
-        loopMs: 100,             // chu kỳ quét auto phục vụ
-        pressRepeatMs: 500,      // ms giữa 2 lần bơm lại nút trà
+        // ---------- kho ----------
+        fallbackBudget: 50,
+        clickDelay: 40,
+        tabDelay: 320,
+        maxReduceRounds: 60,
+        cupsPerCustomer: 1,
+        toppingPerCustomer: 0.5,
+        restockBuffer: 5,
+        maxAddClicksPerRow: 10,
 
-        cupsPerCustomer: 1,      // số ly mỗi khách
-        toppingPerCustomer: 0.5, // trung bình phần topping mỗi khách
-        restockBuffer: 5,        // tồn kho dự phòng sau khi đã phủ nhu cầu
-        maxAddClicksPerRow: 10   // trần số lần bấm +5 cho 1 món
+        // ---------- phục vụ ----------
+        loopMs: 60,
+        pourTargetPct: 'auto',   // 'auto' = đọc vạch xanh .q3ok, nếu lỗi thì 80
+        pourTargetFallback: 80,
+        pressRepeatMs: 600,      // giữ nút rót, nhắc lại mỗi 600ms
+        maxPourMs: 8000,         // rót quá lâu thì bỏ qua (chống kẹt)
+        tapDelayMs: 450,         // giữa 2 lần bấm topping
+        toppingHoldMs: 140,      // giữ nút topping (chịu được cả tap lẫn hold)
+        maxToppingTaps: 2,       // tối đa bấm topping mấy lần, tránh dư
+        toppingMaxMs: 2500,      // topping thêm mãi không được thì bỏ qua
+        sealDelayMs: 400,        // chờ trước khi dán nắp
+        cupClickGapMs: 700
     };
 
     function initMod() {
@@ -43,97 +54,101 @@
 
         var menuEl = document.createElement('div');
         menuEl.id = 'mod-menu';
-        menuEl.style.cssText = 'position:fixed; top:75px; right:20px; width:250px; background:rgba(44, 62, 80, 0.95); color:#ecf0f1; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.4); font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; z-index:999999; overflow:hidden; border:1px solid #34495e; display:none; flex-direction:column;';
+        menuEl.style.cssText = 'position:fixed; top:75px; right:20px; width:255px; background:rgba(44, 62, 80, 0.95); color:#ecf0f1; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.4); font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; z-index:999999; overflow:hidden; border:1px solid #34495e; display:none; flex-direction:column;';
 
         var headerEl = document.createElement('div');
         headerEl.style.cssText = 'background:#e74c3c; padding:8px 12px; font-weight:bold; font-size:13px; display:flex; justify-content:space-between; align-items:center;';
-        headerEl.innerHTML = '<span>🧋 Auto Tiệm Trà v32.0</span><button id="mod-close-btn" style="background:none; border:none; color:white; font-weight:bold; cursor:pointer; font-size:14px;">✕</button>';
+        headerEl.innerHTML = '<span>🧋 Auto Tiệm Trà v33.0</span><button id="mod-close-btn" style="background:none; border:none; color:white; font-weight:bold; cursor:pointer; font-size:14px;">✕</button>';
         menuEl.appendChild(headerEl);
 
+        var row = 'display:flex; align-items:center; gap:8px; font-size:12px;';
+        var lbl = 'display:flex; align-items:center; gap:8px; cursor:pointer;';
         var bodyEl = document.createElement('div');
         bodyEl.style.cssText = 'padding:10px; display:flex; flex-direction:column; gap:8px;';
-        bodyEl.innerHTML = '<button id="btn-prep" style="background:#27ae60; color:white; border:none; padding:8px; border-radius:6px; font-weight:bold; font-size:12px; cursor:pointer; text-align:center;">⚡ Auto Nhập Hàng Thông Minh</button>' +
+        bodyEl.innerHTML =
+            '<button id="btn-prep" style="background:#27ae60; color:white; border:none; padding:8px; border-radius:6px; font-weight:bold; font-size:12px; cursor:pointer; text-align:center;">⚡ Auto Nhập Hàng Thông Minh</button>' +
             '<button id="btn-diag" style="background:#2980b9; color:white; border:none; padding:8px; border-radius:6px; font-weight:bold; font-size:12px; cursor:pointer; text-align:center;">🔍 Chẩn Đoán DOM</button>' +
             '<hr style="border:0; border-top:1px solid #34495e; margin:4px 0;">' +
-            '<div style="display:flex; align-items:center; gap:8px; font-size:12px;"><label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="chk-autocup" checked><b>Auto Ly (Anti-Trap Exact)</b></label></div>' +
-            '<div style="display:flex; align-items:center; gap:8px; font-size:12px;"><label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="chk-autofill" checked><b>Bơm Bù Nước (&lt; 80% ➔ 80%)</b></label></div>';
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autocup" checked><b>1. Lấy ly đúng size</b></label></div>' +
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autofill" checked><b>2. Rót đúng trà (dừng ở vạch)</b></label></div>' +
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autotop" checked><b>3. Thêm topping khách gọi</b></label></div>' +
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autoseal" checked><b>4. Dán nắp &amp; giao ly</b></label></div>' +
+            '<hr style="border:0; border-top:1px solid #34495e; margin:4px 0;">' +
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-trace" checked><b>Trace log (tắt khi ổn)</b></label></div>';
         menuEl.appendChild(bodyEl);
         document.body.appendChild(menuEl);
 
+        // ---------------- kéo thả icon ----------------
         var isDragging = false, startX, startY, initialLeft, initialTop, hasMoved = false;
 
         function onPointerDown(e) {
             isDragging = true; hasMoved = false;
-            var clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            var clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            startX = clientX; startY = clientY;
+            startX = e.touches ? e.touches[0].clientX : e.clientX;
+            startY = e.touches ? e.touches[0].clientY : e.clientY;
             var rect = iconEl.getBoundingClientRect();
             initialLeft = rect.left; initialTop = rect.top;
             iconEl.style.right = 'auto';
             iconEl.style.left = initialLeft + 'px';
             iconEl.style.top = initialTop + 'px';
         }
-
         function onPointerMove(e) {
             if (!isDragging) return;
-            var clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            var clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            var dx = clientX - startX, dy = clientY - startY;
+            var cx = e.touches ? e.touches[0].clientX : e.clientX;
+            var cy = e.touches ? e.touches[0].clientY : e.clientY;
+            var dx = cx - startX, dy = cy - startY;
             if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasMoved = true;
-            var newLeft = Math.max(5, Math.min(window.innerWidth - 50, initialLeft + dx));
-            var newTop = Math.max(5, Math.min(window.innerHeight - 50, initialTop + dy));
-            iconEl.style.left = newLeft + 'px';
-            iconEl.style.top = newTop + 'px';
-            if (menuEl.style.display === 'flex') updateMenuPos(newLeft, newTop);
+            iconEl.style.left = Math.max(5, Math.min(window.innerWidth - 50, initialLeft + dx)) + 'px';
+            iconEl.style.top = Math.max(5, Math.min(window.innerHeight - 50, initialTop + dy)) + 'px';
+            if (menuEl.style.display === 'flex') updateMenuPos(initialLeft + dx, initialTop + dy);
         }
-
         function onPointerUp() { isDragging = false; }
-
         function updateMenuPos(iLeft, iTop) {
-            var mLeft = Math.max(10, Math.min(window.innerWidth - 255, iLeft - 185));
-            var mTop = iTop + 52 > window.innerHeight - 170 ? iTop - 160 : iTop + 52;
-            menuEl.style.left = mLeft + 'px';
-            menuEl.style.top = mTop + 'px';
+            menuEl.style.left = Math.max(10, Math.min(window.innerWidth - 260, iLeft - 185)) + 'px';
+            menuEl.style.top = (iTop + 52 > window.innerHeight - 210 ? iTop - 160 : iTop + 52) + 'px';
             menuEl.style.right = 'auto';
         }
-
         iconEl.addEventListener('mousedown', onPointerDown);
         document.addEventListener('mousemove', onPointerMove);
         document.addEventListener('mouseup', onPointerUp);
         iconEl.addEventListener('touchstart', onPointerDown, {passive: true});
         document.addEventListener('touchmove', onPointerMove, {passive: true});
         document.addEventListener('touchend', onPointerUp);
-
         iconEl.addEventListener('click', function() {
             if (!hasMoved) {
-                var isHidden = menuEl.style.display === 'none' || menuEl.style.display === '';
-                menuEl.style.display = isHidden ? 'flex' : 'none';
-                if (isHidden) updateMenuPos(iconEl.getBoundingClientRect().left, iconEl.getBoundingClientRect().top);
+                var hidden = menuEl.style.display === 'none' || menuEl.style.display === '';
+                menuEl.style.display = hidden ? 'flex' : 'none';
+                if (hidden) {
+                    var r = iconEl.getBoundingClientRect();
+                    updateMenuPos(r.left, r.top);
+                }
             }
         });
         document.getElementById('mod-close-btn').addEventListener('click', function() { menuEl.style.display = 'none'; });
 
-        // ---------- helpers sự kiện giả ----------
+        // ---------------- sự kiện giả ----------------
         function fire(el, types) {
             if (!el || el.isConnected === false) return;
             for (var i = 0; i < types.length; i++) {
-                var type = types[i];
                 try {
-                    var ev = type.indexOf('touch') === 0 ? new Event(type, { bubbles: true, cancelable: true })
-                                                      : new MouseEvent(type, { bubbles: true, cancelable: true, view: window });
+                    var ev = types[i].indexOf('touch') === 0
+                        ? new Event(types[i], { bubbles: true, cancelable: true })
+                        : new MouseEvent(types[i], { bubbles: true, cancelable: true, view: window });
                     el.dispatchEvent(ev);
-                } catch(e) {}
+                } catch (e) {}
             }
         }
-
         function triggerFullClick(el) {
             fire(el, ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'touchstart', 'touchend']);
         }
-
         function startPress(el) { fire(el, ['pointerdown', 'mousedown', 'touchstart']); }
         function stopPress(el) { fire(el, ['pointerup', 'mouseup', 'touchend', 'click']); }
 
-        function sleep(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+        function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+
+        function trace() {
+            if (!document.getElementById('chk-trace').checked) return;
+            console.log.apply(console, ['[BobaAuto]'].concat(Array.prototype.slice.call(arguments)));
+        }
 
         // ==========================================================
         // 💰 ĐỌC TIỀN — chuẩn hoá về "k" (nghìn)
@@ -171,18 +186,14 @@
             if (b.disabled === true) return true;
             if (b.getAttribute && (b.getAttribute('aria-disabled') === 'true' || b.hasAttribute('disabled'))) return true;
             var st = b.getAttribute && b.getAttribute('style');
-            if (st && /pointer-events\s*:\s*none/i.test(st)) return true;
-            return false;
+            return !!(st && /pointer-events\s*:\s*none/i.test(st));
         }
 
         function readCost() {
             var b = getCookBtn();
             if (!b) return null;
             var attr = b.getAttribute && (b.getAttribute('data-cost') || b.getAttribute('data-money'));
-            if (attr) {
-                var a = toK(attr);
-                if (a !== null && a > 0) return a;
-            }
+            if (attr) { var a = toK(attr); if (a !== null && a > 0) return a; }
             var v = toK(b.innerText || b.textContent || '');
             return (v !== null && v >= 0) ? v : null;
         }
@@ -196,8 +207,7 @@
         }
 
         // ==========================================================
-        // 🗂 CAROUSEL — game dịch bằng transform nên mọi .rowi đều "visible"
-        // => phải xác định đúng PAGE đang mở, nếu không sẽ mua trùng N lần
+        // 🗂 CAROUSEL KHO — game dịch bằng transform nên mọi .rowi đều "visible"
         // ==========================================================
         function getSwipe() { return document.getElementById('sw-kho') || document.querySelector('.swipe'); }
 
@@ -229,6 +239,15 @@
             return on ? on.getAttribute('data-si') : null;
         }
 
+        function getWarehouseTabs() {
+            var out = [], btns = document.querySelectorAll('.stabs[data-st="kho"] button[data-si]');
+            for (var i = 0; i < btns.length; i++) {
+                var si = btns[i].getAttribute('data-si');
+                if (si !== null && out.indexOf(si) === -1) out.push(si);
+            }
+            return out.length ? out : ['0', '1', '2'];
+        }
+
         async function selectTab(si) {
             var tab = document.querySelector('.stabs[data-st="kho"] button[data-si="' + si + '"]');
             if (!tab) return false;
@@ -237,12 +256,9 @@
             return true;
         }
 
-        // ==========================================================
-        // 📦 ĐỌC 1 MÓN HÀNG
-        // ==========================================================
         function getPlanInput(btn) {
             var node = btn;
-            for (var depth = 0; depth < 5 && node; depth++, node = node.parentElement) {
+            for (var d = 0; d < 5 && node; d++, node = node.parentElement) {
                 var inp = node.querySelector ? node.querySelector('input[data-plan]') : null;
                 if (inp) return inp;
             }
@@ -255,28 +271,10 @@
             return (!isFinite(v) || v < 0) ? 0 : v;
         }
 
-        function getRowInfo(row) {
-            var nm = row.querySelector('.nm');
-            var name = nm ? getNameText(nm) : '?';
-
-            // .sub đầu tiên là tồn kho; .sub.okline là dòng chi phí kế hoạch
-            var sub = row.querySelector('.sub:not(.okline)') || row.querySelector('.sub');
-            var raw = sub ? String(sub.innerText || sub.textContent || '').replace(/\s+/g, ' ').trim() : '';
-            var nums = raw.match(/\d+(?:[.,]\d+)?/g) || [];
-
-            var stock = null, price = null;
-            if (nums.length) stock = Math.round(parseFloat(nums[0].replace(',', '.'))) || 0;
-            if (nums.length > 1) price = toK(nums[1] + 'k');
-
-            var inp = row.querySelector('input[data-plan]');
-            return {
-                row: row,
-                name: name,
-                stock: stock,
-                price: price,
-                plan: inp ? planValue(inp) : 0,
-                raw: raw
-            };
+        function isVisible(el) {
+            if (!el) return false;
+            if (el.offsetParent !== null) return true;
+            return !!(el.getClientRects && el.getClientRects().length);
         }
 
         function getNameText(nm) {
@@ -288,18 +286,32 @@
             return (clone.textContent || '').trim() || '?';
         }
 
-        // ==========================================================
-        // 🧮 QUY HOẠCH
-        // ==========================================================
+        function getRowInfo(row) {
+            var nm = row.querySelector('.nm');
+            var sub = row.querySelector('.sub:not(.okline)') || row.querySelector('.sub');
+            var raw = sub ? String(sub.innerText || sub.textContent || '').replace(/\s+/g, ' ').trim() : '';
+            var nums = raw.match(/\d+(?:[.,]\d+)?/g) || [];
+            var inp = row.querySelector('input[data-plan]');
+            return {
+                row: row,
+                name: nm ? getNameText(nm) : '?',
+                stock: nums.length ? Math.round(parseFloat(nums[0].replace(',', '.'))) || 0 : null,
+                price: nums.length > 1 ? toK(nums[1] + 'k') : null,
+                plan: inp ? planValue(inp) : 0,
+                raw: raw
+            };
+        }
+
         function splitNeed(total, count) {
             if (count <= 0) return 0;
-            var base = Math.floor(total / count);
-            var extra = total - base * count;
-            var out = [];
+            var base = Math.floor(total / count), extra = total - base * count, out = [];
             for (var i = 0; i < count; i++) out.push(base + (i < extra ? 1 : 0));
             return out;
         }
 
+        // ==========================================================
+        // 📦 QUY HOẠCH KHO
+        // ==========================================================
         async function resetAllPlans() {
             var tabs = getWarehouseTabs();
             for (var t = 0; t < tabs.length; t++) {
@@ -317,67 +329,44 @@
             }
         }
 
-        function getWarehouseTabs() {
-            var out = [];
-            var btns = document.querySelectorAll('.stabs[data-st="kho"] button[data-si]');
-            for (var i = 0; i < btns.length; i++) {
-                var si = btns[i].getAttribute('data-si');
-                if (si !== null && out.indexOf(si) === -1) out.push(si);
-            }
-            return out.length ? out : ['0', '1', '2'];
-        }
-
-        // Quy hoạch 1 tab: target = nhu cầu chia đều + dự phòng, thiếu bao nhiêu thì bấm +5
         async function planTab(si, needEach, budgetK, budgetKnown, label) {
-            if (!(await selectTab(si))) return { added: 0, count: 0 };
-
+            if (!(await selectTab(si))) return { added: 0, count: 0, unknown: 0 };
             var rows = getActiveRows();
-            if (!rows.length) {
-                console.warn('   ⚠️ Không tìm thấy món nào ở tab ' + label + ' (si=' + si + ').');
-                return { added: 0, count: 0 };
-            }
+            if (!rows.length) { console.warn('   ⚠️ Không tìm thấy món nào ở tab ' + label + '.'); return { added: 0, count: 0, unknown: 0 }; }
 
             var added = 0, unknown = 0;
             for (var j = 0; j < rows.length; j++) {
                 var info = getRowInfo(rows[j]);
                 if (info.stock === null) {
                     unknown++;
-                    console.warn('   ⚠️ Không đọc được tồn kho [' + info.name + '] (raw="' + info.raw + '") → bỏ qua, không mù mắt mua.');
+                    console.warn('   ⚠️ Không đọc được tồn kho [' + info.name + '] (raw="' + info.raw + '") → bỏ qua.');
                     continue;
                 }
-
                 var need = needEach(j, rows.length, info);
                 var gap = need - info.stock;
-                if (gap <= 0) {
-                    console.log('   📦 ' + info.name + ': tồn ' + info.stock + ' ≥ cần ' + need + ' → không mua.');
-                    continue;
-                }
+                if (gap <= 0) { console.log('   📦 ' + info.name + ': tồn ' + info.stock + ' ≥ cần ' + need + ' → không mua.'); continue; }
 
                 var clicks = Math.min(CFG.maxAddClicksPerRow, Math.ceil(gap / 5));
-                var stopped = false;
+                var done = 0;
                 for (var c = 0; c < clicks; c++) {
                     var plus = rows[j].querySelector('.step5 button[data-v="5"]');
                     if (!plus) break;
                     triggerFullClick(plus);
-                    added += 5;
+                    added += 5; done++;
                     await sleep(CFG.clickDelay);
                     if (budgetKnown && !isSafeToCook(budgetK, true)) {
-                        console.warn('   ⚠️ Chạm trần ngân sách ở [' + info.name + '] → dừng cộng thêm.');
-                        stopped = true;
+                        console.warn('   ⚠️ Chạm trần ngân sách ở [' + info.name + '] → dừng.');
                         break;
                     }
                 }
-                console.log('   📦 ' + info.name + ': tồn ' + info.stock + ' → cần ' + need +
-                            ' | bấm +5 ' + c + ' lần (+' + (c * 5) + ')' + (stopped ? ' [dừng vì ví]' : '') +
-                            (info.price !== null ? ' | đơn giá ' + info.price + 'k' : ''));
+                console.log('   📦 ' + info.name + ': tồn ' + info.stock + ' → cần ' + need + ' | +5 ×' + done +
+                            (info.price !== null ? ' | ' + info.price + 'k/phần' : ''));
             }
             return { added: added, count: rows.length, unknown: unknown };
         }
 
-        // Cắt giảm: bỏ qua isVisible vì carousel đẩy mọi page ra ngoài màn hình
         function collectReduceButtons() {
-            var out = [];
-            var all = document.querySelectorAll('.step5 button[data-v="-5"]');
+            var out = [], all = document.querySelectorAll('.step5 button[data-v="-5"]');
             for (var i = 0; i < all.length; i++) {
                 var inp = getPlanInput(all[i]);
                 if (!inp) continue;
@@ -391,52 +380,37 @@
             var rot = 0, stuck = 0, lastCost = null;
             for (var round = 0; round < CFG.maxReduceRounds; round++) {
                 if (isSafeToCook(budgetK, budgetKnown)) return true;
-
                 var cands = collectReduceButtons();
                 if (!cands.length) return false;
                 cands.sort(function(a, b) { return b.val - a.val; });
-
                 var pick = cands[rot % cands.length];
                 if (!pick || pick.btn.isConnected === false) { rot++; continue; }
                 triggerFullClick(pick.btn);
                 await sleep(CFG.clickDelay);
-
                 var nc = readCost();
                 if (nc !== null && lastCost !== null && nc >= lastCost) { stuck++; rot++; }
                 else { stuck = 0; rot = 0; }
                 lastCost = nc;
-
-                if (stuck > 8) {
-                    console.warn('   ⚠️ Chi phí không giảm sau nhiều lần bấm → dừng cắt giảm.');
-                    return false;
-                }
+                if (stuck > 8) { console.warn('   ⚠️ Chi phí không giảm → dừng cắt giảm.'); return false; }
             }
             return isSafeToCook(budgetK, budgetKnown);
         }
 
-        // ==========================================================
-        // ⚡ NÚT AUTO NHẬP HÀNG
-        // ==========================================================
         var prepBusy = false;
         var btnPrep = document.getElementById('btn-prep');
 
         btnPrep.addEventListener('click', async function() {
-            if (prepBusy) { console.warn('⏳ Đang chạy dở, chờ xong đã hẵng bấm lại.'); return; }
+            if (prepBusy) { console.warn('⏳ Đang chạy dở.'); return; }
             prepBusy = true; btnPrep.disabled = true; btnPrep.style.opacity = '0.6';
-
             try {
                 console.log('\n==================================================');
-                console.log('📦 [SMART-BUDGET v32.0] BẮT ĐẦU NHẬP HÀNG');
+                console.log('📦 [SMART-BUDGET v33.0] BẮT ĐẦU NHẬP HÀNG');
                 console.log('==================================================');
 
                 var budget = readBudget();
                 var budgetKnown = budget !== null && budget > 0;
-                if (!budgetKnown) {
-                    budget = CFG.fallbackBudget;
-                    console.warn('💰 Không đọc được #hMoney — dùng ngân sách dự phòng ' + budget + 'k.');
-                } else {
-                    console.log('💰 Ví hiện tại có: ' + budget + 'k');
-                }
+                if (!budgetKnown) { budget = CFG.fallbackBudget; console.warn('💰 Không đọc được #hMoney — dùng ' + budget + 'k.'); }
+                else console.log('💰 Ví: ' + budget + 'k');
 
                 var foreEl = document.querySelector('.fore.big2') || document.querySelector('.fore');
                 var customers = 20;
@@ -444,240 +418,374 @@
                     var mC = (foreEl.innerText || '').match(/\d+/);
                     if (mC) customers = Math.min(500, Math.max(1, parseInt(mC[0], 10)));
                 }
-                console.log('👥 Dự báo khách hôm nay: ~' + customers + ' người');
-
                 var demand = customers * CFG.cupsPerCustomer;
-                console.log('🎯 Nhu cầu: ' + demand + ' ly' +
-                            ' | topping ~' + Math.round(demand * CFG.toppingPerCustomer) +
-                            ' | dự phòng ' + CFG.restockBuffer);
+                console.log('👥 Khách: ~' + customers + ' → nhu cầu ' + demand + ' ly');
 
                 var khoTab = document.querySelector('.tab[data-tab="kho"]');
                 if (khoTab) { triggerFullClick(khoTab); await sleep(250); }
 
-                console.log('🧹 Đang đưa toàn bộ kế hoạch về 0...');
+                console.log('🧹 Đưa toàn bộ kế hoạch về 0...');
                 await resetAllPlans();
                 await sleep(150);
 
-                // 1) TRÀ — chia đều nhu cầu, ly luôn đủ bằng tổng phần trà
                 await selectTab('0');
                 var teaCount = getActiveRows().length;
                 var teaPlan = splitNeed(demand, teaCount);
                 var teaSum = 0;
                 for (var t2 = 0; t2 < teaPlan.length; t2++) teaSum += teaPlan[t2];
+                await planTab('0', function(j) { return teaPlan[j] + CFG.restockBuffer; }, budget, budgetKnown, 'Trà');
+                console.log('   → Trà: ' + teaCount + ' món, tổng ' + teaSum + ' phần.');
 
-                var rTea = await planTab('0', function(j, n) {
-                    return teaPlan[j] + CFG.restockBuffer;
-                }, budget, budgetKnown, 'Trà');
-                console.log('   → Trà: ' + teaCount + ' món, tổng kế hoạch ' + teaSum + ' phần.');
-
-                // 2) TOPPING — trung bình toppingPerCustomer mỗi khách
                 var toppingNeed = Math.max(1, Math.round(demand * CFG.toppingPerCustomer));
-                await planTab('1', function(j, n) {
-                    return Math.max(1, Math.round(toppingNeed / n)) + CFG.restockBuffer;
-                }, budget, budgetKnown, 'Topping');
+                await planTab('1', function(j, n) { return Math.max(1, Math.round(toppingNeed / n)) + CFG.restockBuffer; }, budget, budgetKnown, 'Topping');
 
-                // 3) LY — phải đủ bằng tổng phần trà vừa quy hoạch
                 var cupNeed = Math.max(demand, teaSum);
-                var rCup = await planTab('2', function() {
-                    return cupNeed + CFG.restockBuffer;
-                }, budget, budgetKnown, 'Ly');
-                console.log('   → Ly: cần ' + cupNeed + ' (theo số khách và tổng phần trà).');
-
-                if (rTea.unknown || rCup.unknown) {
-                    console.warn('⚠️ Có món không đọc được tồn kho → xem lại log ở trên.');
-                }
+                await planTab('2', function() { return cupNeed + CFG.restockBuffer; }, budget, budgetKnown, 'Ly');
+                console.log('   → Ly: cần ' + cupNeed + '.');
 
                 await sleep(300);
                 var st = { cost: readCost(), blocked: isCookBlocked() };
-                console.log('💡 [KIỂM TRA VỐN] Chi phí: ' + (st.cost === null ? '?' : st.cost + 'k') +
-                            ' | Ví: ' + budget + 'k' + (st.blocked ? ' | 🔒 nút NẤu bị khoá' : ''));
+                console.log('💡 Chi phí: ' + (st.cost === null ? '?' : st.cost + 'k') + ' | Ví: ' + budget + 'k' + (st.blocked ? ' | 🔒 bị khoá' : ''));
 
                 if (!isSafeToCook(budget, budgetKnown)) {
-                    console.warn('⚠️ [KHỬ KẸT] Vượt ví hoặc nút nấu bị khoá → đang cắt giảm...');
+                    console.warn('⚠️ [KHỬ KẸT] Đang cắt giảm theo từng tab...');
                     await reduceToBudget(budget, budgetKnown);
                 }
 
                 var fin = { cost: readCost(), blocked: isCookBlocked() };
                 if (!isSafeToCook(budget, budgetKnown)) {
-                    console.error('❌ [DỪNG] Vẫn không đủ điều kiện (chi phí ' +
-                                  (fin.cost === null ? '?' : fin.cost + 'k') + ', khóa: ' + fin.blocked +
-                                  ') → KHÔNG bấm NẤU để tránh lỗi 999999k.');
+                    console.error('❌ [DỪNG] Chi phí ' + (fin.cost === null ? '?' : fin.cost + 'k') + ', khóa: ' + fin.blocked + ' → KHÔNG bấm NẤU.');
                     return;
                 }
-                if (fin.cost === null) console.warn('⚠️ Không đọc được chi phí để xác nhận, tiến hành nấu.');
-
-                console.log('🔥 Chi phí ' + fin.cost + 'k ≤ ' + budget + 'k → bấm NẤU.');
+                console.log('🔥 ' + fin.cost + 'k ≤ ' + budget + 'k → bấm NẤU.');
                 triggerFullClick(getCookBtn());
                 console.log('==================================================\n');
             } catch (err) {
-                console.error('💥 [LỖI] Auto nhập hàng dừng đột ngột:', err);
+                console.error('💥 [LỖI]', err);
             } finally {
                 prepBusy = false; btnPrep.disabled = false; btnPrep.style.opacity = '1';
             }
         });
 
         // ==========================================================
+        // 🍵 PHỤC VỤ — MÁY TRẠNG THÁI
+        //   cup -> pour -> topping -> seal
+        // ==========================================================
+        var TEAS = [
+            { key: 'matcha', re: /matcha/i },
+            { key: 'hong',   re: /hồng\s*trà/i },
+            { key: 'luc',    re: /lục\s*trà/i },
+            { key: 'olong',  re: /ol?long|ô\s*long/i },
+            { key: 'thai',   re: /thái|thai/i },
+            { key: 'tra',    re: /trà\s*sữa|trà\s*đen|trà\s*đào|trà\s*chanh/i }
+        ];
+
+        var chkCup = document.getElementById('chk-autocup');
+        var chkPour = document.getElementById('chk-autofill');
+        var chkTop = document.getElementById('chk-autotop');
+        var chkSeal = document.getElementById('chk-autoseal');
+
+        function freshServe() {
+            return {
+                order: null, phase: 'cup', phaseAt: Date.now(),
+                target: null, pressing: null, lastPress: 0,
+                lastPct: null, lastPctAt: Date.now(), rate: 0,
+                lastTop: 0, topTries: 0, popsBefore: -1,
+                lastCupClick: 0, trashAt: 0, lastPhaseLog: ''
+            };
+        }
+        var SERVE = freshServe();
+
+        function getOrderText() {
+            var el = document.getElementById('q3say');
+            return el ? String(el.innerText || '').replace(/\s+/g, ' ').trim() : '';
+        }
+        function getZones() { return document.getElementById('q3zones'); }
+        function selling() { return document.body.classList.contains('selling'); }
+
+        function hasCup() {
+            var noCup = document.getElementById('q3noCup');
+            if (noCup && isVisible(noCup)) return false;
+            var cup = document.getElementById('q3cup');
+            return !!(cup && cup.getClientRects && cup.getClientRects().length);
+        }
+        function cupSealed() {
+            var cup = document.getElementById('q3cup');
+            if (!cup) return false;
+            var lid = cup.querySelector('img.q3lid');
+            return !!(lid && !lid.hasAttribute('hidden') && lid.style.display !== 'none');
+        }
+        function getCupSize() {
+            var cup = document.getElementById('q3cup');
+            if (!cup) return null;
+            var texts = cup.querySelectorAll('svg text, svg tspan');
+            for (var i = 0; i < texts.length; i++) {
+                var t = (texts[i].textContent || '').trim().toUpperCase();
+                if (t === 'M' || t === 'L') return t;
+            }
+            return null;
+        }
+        function getWantedSize(say) {
+            var m = say.match(/size\s*([ML])\b/i) || say.match(/ly\s*([ML])\b/i);
+            return m ? m[1].toUpperCase() : null;
+        }
+        function getPourPct() {
+            var lv = document.getElementById('q3gLv');
+            if (!lv) return null;
+            var w = parseFloat(lv.style.width || '0');
+            return isFinite(w) ? w : null;
+        }
+        function getPourTarget() {
+            if (typeof CFG.pourTargetPct === 'number') return CFG.pourTargetPct;
+            var gauge = document.querySelector('.q3gauge');
+            var ok = gauge ? gauge.querySelector('.q3ok') : null;
+            if (ok && gauge && gauge.clientWidth > 0) {
+                var pct = (ok.offsetLeft / gauge.clientWidth) * 100;
+                if (isFinite(pct) && pct > 5 && pct < 100) return pct;
+            }
+            return CFG.pourTargetFallback;
+        }
+        // game tự đánh dấu hũ trà khách đang gọi bằng class .q3want
+        function getWantedTeaBtn() {
+            var z = getZones();
+            if (!z) return null;
+            var mark = z.querySelector('.q3jar.q3want:not(.q3lock)');
+            if (mark) return mark;
+            var say = getOrderText();
+            for (var i = 0; i < TEAS.length; i++) {
+                if (!TEAS[i].re.test(say)) continue;
+                var b = z.querySelector('.q3jar[data-tea="' + TEAS[i].key + '"]:not(.q3lock)');
+                if (b) return b;
+            }
+            return null;
+        }
+        // topping cũng được đánh dấu .q3want, phân biệt bằng data-a^="top:"
+        function getWantedTopBtn() {
+            var z = getZones();
+            return z ? z.querySelector('.q3z.q3want[data-a^="top:"]:not(.q3lock)') : null;
+        }
+        function topName(btn) {
+            return btn ? (btn.getAttribute('aria-label') || btn.id || '?') : '?';
+        }
+        function toppingSatisfied(top, st) {
+            if (!top) return true;
+            if (top.hasAttribute('hidden') || top.style.display === 'none') return true;
+            if (/q3on|q3done|q3used|q3had/.test(top.className)) return true;
+            if (!/\bq3want\b/.test(top.className)) return true;
+            var pops = document.getElementById('q3pops');
+            if (pops && st.popsBefore >= 0 && pops.childElementCount > st.popsBefore) return true;
+            return false;
+        }
+
+        function releasePour() {
+            if (SERVE.pressing) { stopPress(SERVE.pressing); SERVE.pressing = null; }
+        }
+        function setPhase(p, note) {
+            if (SERVE.phase === p) return;
+            SERVE.phase = p;
+            SERVE.phaseAt = Date.now();
+            trace('→ ' + p + (note ? ' (' + note + ')' : ''));
+        }
+
+        function stepServe() {
+            if (!selling()) { releasePour(); return; }
+            var now = Date.now();
+            var say = getOrderText();
+            var st = SERVE;
+
+            if (say !== st.order) {
+                releasePour();
+                st = SERVE = freshServe();
+                st.order = say;
+                if (say) trace('📝 order: "' + say + '"');
+            }
+
+            var idle = !say || /ngồi chơi|đang chờ khách|chờ khách|hết khách/i.test(say);
+            if (idle) {
+                releasePour();
+                var p = getPourPct();
+                if (p !== null && p > 1 && !cupSealed() && hasCup() && now - st.trashAt > 1500) {
+                    var tr = document.getElementById('q3trash');
+                    if (tr) { triggerFullClick(tr); st.trashAt = now; trace('🗑️ đổ ly sót (' + p.toFixed(1) + '%)'); }
+                }
+                st.phase = 'cup';
+                return;
+            }
+
+            // ---- 1. LẤY LY ----
+            if (!hasCup()) {
+                releasePour();
+                st.phase = 'cup';
+                if (chkCup.checked && now - st.lastCupClick > CFG.cupClickGapMs) {
+                    var want = getWantedSize(say);
+                    if (want) {
+                        var z = getZones();
+                        var b = document.getElementById('q3_' + want) ||
+                                (z ? z.querySelector('[data-a="size:' + want + '"]') : null);
+                        if (b) { triggerFullClick(b); st.lastCupClick = now; trace('🥤 lấy ly ' + want); }
+                    }
+                }
+                return;
+            }
+
+            // sai size thì đổ ly làm lại
+            var onBoard = getCupSize();
+            var wantSize = getWantedSize(say);
+            if (wantSize && onBoard && onBoard !== wantSize) {
+                releasePour();
+                if (chkCup.checked && now - st.trashAt > 1500) {
+                    var trash = document.getElementById('q3trash');
+                    if (trash) { triggerFullClick(trash); st.trashAt = now; trace('🗑️ ly ' + onBoard + ' ≠ yêu cầu ' + wantSize + ' → đổ'); }
+                }
+                st.phase = 'cup';
+                return;
+            }
+
+            // ---- 2. RÓT TRÀ ----
+            var pct = getPourPct();
+            if (pct === null) { releasePour(); return; }
+            if (st.target === null) st.target = getPourTarget();
+
+            if (pct < st.target - 1) {
+                if (!chkPour.checked) { setPhase('top'); return; }
+                st.phase = 'pour';
+
+                // đo tốc độ để thả tay đúng vạch, không bơm quá
+                if (st.lastPct !== null && now - st.lastPctAt > 30) {
+                    st.rate = (pct - st.lastPct) / (now - st.lastPctAt);
+                    st.lastPct = pct;
+                    st.lastPctAt = now;
+                } else if (st.lastPct === null) {
+                    st.lastPct = pct; st.lastPctAt = now;
+                }
+                var predicted = pct + st.rate * (CFG.loopMs * 1.5);
+
+                if (predicted >= st.target - 0.3) { releasePour(); return; }
+
+                var jar = getWantedTeaBtn();
+                if (!jar) {
+                    if (now - st.phaseAt > 2500) { trace('⚠️ không tìm thấy hũ trà đúng yêu cầu'); st.phaseAt = now; }
+                    return;
+                }
+                if (st.pressing === jar) {
+                    if (now - st.lastPress > CFG.pressRepeatMs) { startPress(jar); st.lastPress = now; }
+                } else {
+                    releasePour();
+                    startPress(jar);
+                    st.pressing = jar;
+                    st.lastPress = now;
+                    trace('🫗 rót ' + (jar.getAttribute('aria-label') || jar.getAttribute('data-tea')) +
+                          ' → mục tiêu ' + st.target.toFixed(1) + '%');
+                }
+                if (now - st.phaseAt > CFG.maxPourMs) {
+                    releasePour();
+                    trace('⚠️ rót quá ' + CFG.maxPourMs + 'ms, bỏ qua');
+                    setPhase('top');
+                }
+                return;
+            }
+
+            releasePour();
+            if (st.lastPhaseLog !== 'pour-ok') { trace('✅ rót xong ' + pct.toFixed(1) + '% (>= ' + st.target.toFixed(1) + '%)'); st.lastPhaseLog = 'pour-ok'; }
+            setPhase('top');
+
+            // ---- 3. TOPPING ----
+            if (st.phase === 'top') {
+                var top = getWantedTopBtn();
+                if (!top || toppingSatisfied(top, st)) {
+                    if (top) trace('🧋 topping "' + topName(top) + '" đã xong sau ' + st.topTries + ' lần bấm');
+                    setPhase('seal');
+                } else if (now - st.phaseAt > CFG.toppingMaxMs) {
+                    trace('⚠️ topping không nhận được sau ' + CFG.toppingMaxMs + 'ms → bỏ qua');
+                    setPhase('seal');
+                } else if (st.topTries >= CFG.maxToppingTaps) {
+                    trace('⚠️ đã bấm topping ' + CFG.maxToppingTaps + ' lần → bỏ qua');
+                    setPhase('seal');
+                } else if (now - st.lastTop > CFG.tapDelayMs) {
+                    var pops = document.getElementById('q3pops');
+                    if (st.topTries === 0) st.popsBefore = pops ? pops.childElementCount : -1;
+                    // giữ ~140ms: chịu được cả handler bấm lẫn handler giữ
+                    startPress(top);
+                    setTimeout(function() { stopPress(top); }, CFG.toppingHoldMs);
+                    st.lastTop = now;
+                    st.topTries++;
+                    trace('🧋 thêm topping: ' + topName(top) + ' (lần ' + st.topTries + '/' + CFG.maxToppingTaps + ')');
+                }
+                return;
+            }
+
+            // ---- 4. DÁN NẮP & GIAO LY ----
+            if (st.phase === 'seal') {
+                if (now - st.phaseAt < CFG.sealDelayMs) return;
+                if (!chkSeal.checked) { st.phase = 'idle'; return; }
+                var seal = document.getElementById('q3seal');
+                if (seal) { triggerFullClick(seal); trace('✅ dán nắp & giao ly'); }
+                st.phase = 'idle';
+                return;
+            }
+        }
+
+        setInterval(stepServe, CFG.loopMs);
+
+        // ==========================================================
         // 🔍 CHẨN ĐOÁN
         // ==========================================================
         document.getElementById('btn-diag').addEventListener('click', function() {
             var L = [];
-            L.push('===== CHẨN ĐOÁN v32.0 =====');
-            L.push('#hMoney: ' + (document.getElementById('hMoney') ? document.getElementById('hMoney').innerText : 'KHÔNG CÓ'));
-            L.push('.fore: ' + (document.querySelector('.fore') ? document.querySelector('.fore').innerText : 'KHÔNG CÓ'));
-
+            L.push('===== CHẨN ĐOÁN v33.0 =====');
+            L.push('body.class = "' + document.body.className + '"');
+            L.push('#hMoney = ' + (document.getElementById('hMoney') ? document.getElementById('hMoney').innerText : '?'));
+            L.push('#fore = ' + (document.querySelector('.fore') ? document.querySelector('.fore').innerText : '?'));
             var cook = getCookBtn();
-            L.push('#cook: ' + (cook ? cook.outerHTML.replace(/\s+/g, ' ') : 'KHÔNG CÓ (chưa tới bước nấu?)'));
-            L.push('readCost = ' + readCost() + ' | blocked = ' + isCookBlocked());
+            L.push('#cook = ' + (cook ? cook.outerHTML.replace(/\s+/g, ' ').slice(0, 160) : 'KHÔNG CÓ'));
+            L.push('readCost=' + readCost() + ' blocked=' + isCookBlocked());
 
+            L.push('--- CAROUSEL KHO ---');
             var swipe = getSwipe();
-            L.push('swipe: ' + (swipe ? '#' + swipe.id + ' w=' + Math.round(swipe.getBoundingClientRect().width) : 'KHÔNG CÓ'));
-            L.push('tab active: data-si=' + getActiveTabSi());
-            L.push('số .spage = ' + document.querySelectorAll('.spage').length +
-                   ' | số .rowi.kho (toàn bộ) = ' + document.querySelectorAll('.rowi.kho').length);
-
+            L.push('swipe=' + (swipe ? '#' + swipe.id + ' w=' + Math.round(swipe.getBoundingClientRect().width) : '?'));
+            L.push('tab data-si đang mở = ' + getActiveTabSi());
+            var pages = document.querySelectorAll('.spage');
             var act = getActiveSpage();
-            L.push('page đang mở: ' + (act ? '#' + (Array.prototype.indexOf.call(document.querySelectorAll('.spage'), act)) : '?'));
-            if (act) {
-                Array.prototype.slice.call(document.querySelectorAll('.spage')).forEach(function(p, i) {
-                    var r = p.getBoundingClientRect();
-                    L.push('  spage[' + i + '] left=' + Math.round(r.left) + ' w=' + Math.round(r.width) +
-                           (i === Array.prototype.indexOf.call(document.querySelectorAll('.spage'), act) ? '  <== ACTIVE' : ''));
-                });
+            L.push('số .spage = ' + pages.length + ' | số .rowi.kho = ' + document.querySelectorAll('.rowi.kho').length);
+            for (var i = 0; i < pages.length; i++) {
+                var r = pages[i].getBoundingClientRect();
+                L.push('  spage[' + i + '] left=' + Math.round(r.left) + ' w=' + Math.round(r.width) + (pages[i] === act ? '  <== ACTIVE' : ''));
             }
-
             L.push('--- Món trong page đang mở ---');
             getActiveRows().forEach(function(row) {
                 var inf = getRowInfo(row);
-                L.push('  ' + inf.name + ' | tồn=' + inf.stock + ' | giá=' + inf.price +
-                       'k | kế hoạch=' + inf.plan + ' | raw="' + inf.raw + '"');
+                L.push('  ' + inf.name + ' | tồn=' + inf.stock + ' | giá=' + inf.price + 'k | KH=' + inf.plan + ' | raw="' + inf.raw + '"');
             });
-
-            L.push('--- Món ngoài page đang mở (bị carousel đẩy) ---');
+            L.push('--- Món ngoài page (carousel đẩy) ---');
             Array.prototype.slice.call(document.querySelectorAll('.rowi.kho')).forEach(function(row) {
                 if (act && act.contains(row)) return;
                 var inf = getRowInfo(row);
-                L.push('  ' + inf.name + ' | tồn=' + inf.stock + ' | giá=' + inf.price + 'k | raw="' + inf.raw + '"');
+                L.push('  ' + inf.name + ' | tồn=' + inf.stock + ' | raw="' + inf.raw + '"');
             });
 
-            L.push('--- Nút -5 sẽ bị bấm khi cắt giảm ---');
-            L.push('  tổng số nút -5 = ' + document.querySelectorAll('.step5 button[data-v="-5"]').length);
+            L.push('===== MÀN PHỤC VỤ =====');
+            L.push('order = "' + getOrderText() + '"');
+            L.push('phase = ' + SERVE.phase + ' | target = ' + SERVE.target);
+            L.push('hasCup = ' + hasCup() + ' | sealed = ' + cupSealed() + ' | size trên ly = ' + getCupSize());
+            L.push('gauge = ' + getPourPct() + '% | target đọc từ .q3ok = ' + getPourTarget().toFixed(1) + '%');
+            var jar = getWantedTeaBtn();
+            L.push('hũ trà game yêu cầu = ' + (jar ? jar.id + ' (' + jar.className + ')' : 'KHÔNG CÓ'));
+            var top = getWantedTopBtn();
+            L.push('topping game yêu cầu = ' + (top ? top.id + ' (' + top.className + ')' : 'KHÔNG CÓ'));
+            L.push('#q3pops children = ' + (document.getElementById('q3pops') ? document.getElementById('q3pops').childElementCount : '?'));
+            var lid = document.querySelector('#q3cup img.q3lid');
+            L.push('#q3cup img.q3lid hidden = ' + (lid ? lid.hasAttribute('hidden') : '?'));
+            L.push('gauge .q3ok offsetLeft = ' + (document.querySelector('.q3gauge .q3ok') ? document.querySelector('.q3gauge .q3ok').offsetLeft : '?') +
+                   ' / gauge w = ' + (document.querySelector('.q3gauge') ? document.querySelector('.q3gauge').clientWidth : '?'));
+            L.push('--- Tất cả .q3want trong #q3zones ---');
+            var ws = document.querySelectorAll('#q3zones .q3want');
+            for (var k = 0; k < ws.length; k++) L.push('  ' + ws[k].id + ' | ' + ws[k].className + ' | ' + (ws[k].getAttribute('data-a') || ws[k].getAttribute('data-tea') || ''));
             console.log(L.join('\n'));
         });
 
-        // ==========================================================
-        // 🍵 VÒNG LẶP TỰ ĐỘNG PHỤC VỤ KHÁCH
-        // ==========================================================
-        var chkAutoCup = document.getElementById('chk-autocup');
-        var chkAutoFill = document.getElementById('chk-autofill');
-        var lastSayText = "", lastWidth = 0, lastWidthTime = 0;
-        var isPumpingState = false, currentPressingEl = null, lastPressTime = 0;
-        var cupSizeCache = { t: 0, val: null };
-
-        setInterval(runAutoLoop, CFG.loopMs);
-
-        function getCupSizeOnBoard() {
-            var now = Date.now();
-            if (now - cupSizeCache.t < 300) return cupSizeCache.val;
-            var texts = document.querySelectorAll('svg text, svg tspan');
-            var found = null;
-            for (var i = 0; i < texts.length; i++) {
-                var t = (texts[i].textContent || '').trim().toUpperCase();
-                if (t === 'M' || t === 'L') { found = t; break; }
-            }
-            cupSizeCache = { t: now, val: found };
-            return found;
-        }
-
-        function runAutoLoop() {
-            var sayEl = document.getElementById('q3say');
-            var currentSayText = sayEl ? sayEl.innerText.trim() : "";
-
-            if (currentSayText !== lastSayText) {
-                if (currentPressingEl) { stopPress(currentPressingEl); currentPressingEl = null; }
-                lastSayText = currentSayText;
-                lastWidth = 0; lastWidthTime = 0; isPumpingState = false; lastPressTime = 0;
-            }
-            if (currentPressingEl && currentPressingEl.isConnected === false) currentPressingEl = null;
-
-            if (chkAutoCup.checked && currentSayText && !/ngồi chơi|đang chờ khách/i.test(currentSayText)) {
-                var needsM = /\bsize\s*M\b|\bly\s+M\b/i.test(currentSayText);
-                var needsL = /\bsize\s*L\b|\bly\s+L\b/i.test(currentSayText);
-                var requiredSize = needsM ? 'M' : (needsL ? 'L' : null);
-
-                if (requiredSize) {
-                    var cupOnBoard = getCupSizeOnBoard();
-                    var btnM = document.getElementById('q3_M') || document.querySelector('[data-a="size:M"]');
-                    var btnL = document.getElementById('q3_L') || document.querySelector('[data-a="size:L"]');
-                    var trashBtn = document.getElementById('q3trash') || document.querySelector('[data-a="trash"]');
-
-                    if (cupOnBoard && cupOnBoard !== requiredSize) {
-                        if (trashBtn) triggerFullClick(trashBtn);
-                        return;
-                    }
-                    if (!cupOnBoard) {
-                        if (requiredSize === 'M' && btnM) triggerFullClick(btnM);
-                        else if (requiredSize === 'L' && btnL) triggerFullClick(btnL);
-                    }
-                }
-            }
-
-            if (chkAutoFill.checked) {
-                var gaugeLv = document.getElementById('q3gLv');
-                if (gaugeLv && gaugeLv.offsetParent !== null) {
-                    var currentWidth = parseFloat(gaugeLv.style.width || '0');
-                    var now = Date.now();
-
-                    if (isPumpingState) {
-                        if (currentWidth >= 80) {
-                            if (currentPressingEl) { stopPress(currentPressingEl); currentPressingEl = null; }
-                            isPumpingState = false;
-                        } else {
-                            var target = getTeaTargetBtn(currentSayText);
-                            if (target && (currentPressingEl !== target || now - lastPressTime > CFG.pressRepeatMs)) {
-                                if (currentPressingEl && currentPressingEl !== target) stopPress(currentPressingEl);
-                                currentPressingEl = target;
-                                lastPressTime = now;
-                                startPress(target);
-                            }
-                        }
-                        return;
-                    }
-
-                    if (currentWidth !== lastWidth) { lastWidth = currentWidth; lastWidthTime = now; return; }
-
-                    if (currentWidth > 0 && currentWidth < 80 && (now - lastWidthTime > 250)) {
-                        isPumpingState = true;
-                        lastPressTime = 0;
-                        var first = getTeaTargetBtn(currentSayText);
-                        if (first) { currentPressingEl = first; lastPressTime = Date.now(); startPress(first); }
-                    }
-                } else {
-                    if (currentPressingEl) { stopPress(currentPressingEl); currentPressingEl = null; }
-                    isPumpingState = false;
-                }
-            }
-        }
-
-        function getTeaTargetBtn(currentSayText) {
-            var target = document.querySelector('.q3jar.q3want');
-            if (target) return target;
-            if (currentSayText) {
-                if (/thái/i.test(currentSayText)) return document.getElementById('q3b_thai');
-                if (/matcha/i.test(currentSayText)) return document.getElementById('q3b_matcha');
-                if (/hồng/i.test(currentSayText)) return document.getElementById('q3b_hong');
-                if (/lục/i.test(currentSayText)) return document.getElementById('q3b_luc');
-                if (/olong|ô long/i.test(currentSayText)) return document.getElementById('q3b_olong');
-                if (/trà sữa/i.test(currentSayText)) return document.getElementById('q3b_tra');
-            }
-            return null;
-        }
-
-        console.log('✅ [TAMPERMONKEY] Auto Tiệm Trà v32.0 (carousel-safe + demand planning) đã kích hoạt!');
+        console.log('✅ [TAMPERMONKEY] Auto Tiệm Trà v33.0 đã kích hoạt!');
     }
 
-    if (document.readyState === 'complete' || document.readyState === 'interactive') {
-        setTimeout(initMod, 500);
-    } else {
-        window.addEventListener('DOMContentLoaded', initMod);
-    }
+    if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(initMod, 500);
+    else window.addEventListener('DOMContentLoaded', initMod);
 })();
