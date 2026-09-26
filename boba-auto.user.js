@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926161449
+// @version      20260926161818
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '33.9',
+        appVersion: '34.0',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -899,7 +899,65 @@
                 return;
             }
 
-            // ---- 2. RÓT TRÀ ----
+            // ---- 2. TOPPING (làm TRƯỚC khi rót) ----
+            // Thứ tự đúng của game: lấy ly -> bỏ topping -> rót trà -> dán nắp.
+            // Rót trước rồi topping sẽ không ăn, game cứ đứng chờ topping nên dán nắp vô ích.
+            if (st.phase === 'cup') {
+                st.phase = 'top';
+                st.phaseAt = now;
+                st.topTries = 0;
+                st.lastTop = 0;
+                var pb = document.getElementById('q3pops');
+                st.popsBefore = pb ? pb.childElementCount : -1;
+                st.shapesBefore = cupShapeCount();
+                trace('   chuẩn bị bỏ topping: q3pops=' + st.popsBefore + ' hình trong ly=' + st.shapesBefore);
+            }
+            if (st.phase === 'top') {
+                var top = getWantedTopBtn();
+                var popsNow = document.getElementById('q3pops');
+                var popsCnt = popsNow ? popsNow.childElementCount : -1;
+                var shapeNow = cupShapeCount();
+                if (!top) {
+                    // đơn này không gọi topping -> sang rót luôn
+                    setPhase('pour');
+                    return;
+                }
+                if (toppingSatisfied(top, st)) {
+                    trace('🧋 topping "' + topName(top) + '" XONG sau ' + st.topTries + ' lần bấm' +
+                          ' | pops ' + st.popsBefore + '→' + popsCnt + ' | hình trong ly ' + st.shapesBefore + '→' + shapeNow +
+                          ' → chuyển sang rót');
+                    setPhase('pour');
+                } else if (now - st.phaseAt > CFG.toppingMaxMs) {
+                    traceOnce('topTimeout', '⚠️ topping không nhận được sau ' + CFG.toppingMaxMs + 'ms\n' +
+                           '    nút="' + topName(top) + '" class="' + top.className + '"' +
+                           ' | pops ' + st.popsBefore + '→' + popsCnt + ' | hình ' + st.shapesBefore + '→' + shapeNow +
+                           '\n    game đang chờ: "' + (getCoachHint() || '?') + '" → vẫn rót tiếp');
+                    setPhase('pour');
+                } else if (st.topTries >= CFG.maxToppingTaps) {
+                    traceOnce('topMax', '⚠️ đã bấm topping ' + CFG.maxToppingTaps + ' lần mà ly không đổi' +
+                           ' (pops ' + st.popsBefore + '→' + popsCnt + ', hình trong ly ' + st.shapesBefore + '→' + shapeNow + ')' +
+                           ' | nút="' + topName(top) + '" class="' + top.className + '"\n' +
+                           '    game đang chờ: "' + (getCoachHint() || '?') + '" → vẫn rót tiếp');
+                    setPhase('pour');
+                } else if (st.topTries === 0 && now - st.phaseAt < CFG.topSettleMs) {
+                    // chờ game bật nút topping sau khi lấy ly
+                    return;
+                } else if (now - st.lastTop > CFG.tapDelayMs) {
+                    // topping chỉ ăn click, tuyệt đối không đè (đè = trượt hoặc dồn lớp)
+                    var way = (st.topTries % TOP_TOPPING_WAYS.length);
+                    var wname = TOP_TOPPING_WAYS[way].name;
+                    TOP_TOPPING_WAYS[way].run(top);
+                    st.lastTop = now;
+                    st.topTries++;
+                    trace('🧋 thêm topping: "' + topName(top) + '" [' + top.getAttribute('data-a') +
+                          '] lần ' + st.topTries + '/' + CFG.maxToppingTaps + ' bằng [' + wname + ']' +
+                          ' | pops ' + st.popsBefore + ' hình ' + st.shapesBefore +
+                          ' | game chờ: "' + (getCoachHint() || '?') + '"');
+                }
+                return;
+            }
+
+            // ---- 3. RÓT TRÀ (bước cuối, sau khi đã bỏ topping) ----
             var pct = getPourPct();
             if (pct === null) { releasePour(); return; }
             // đọc lại mục tiêu mỗi 500ms: lúc đầu gauge chưa có kích thước thì chưa lấy được vạch xanh
@@ -908,10 +966,10 @@
                 st.targetAt = now;
             }
 
-            // rót tới khi nào pct >= st.target (>= pourMinPct) thì mới sang bước sau
+            // rót tới khi nào pct >= st.target (>= pourMinPct) thì mới sang bước dán nắp
             if (pct < st.target) {
-                if (!chkPour.checked) { setPhase('top'); return; }
-                // mới vào bước rót thì reset đồng hồ 8s + tốc độ cũ (ly vừa lấy/lấy lại)
+                if (!chkPour.checked) { setPhase('seal'); return; }
+                // mới vào bước rót thì reset đồng hồ 8s + tốc độ cũ
                 if (st.phase !== 'pour') {
                     st.phase = 'pour';
                     st.phaseAt = now;
@@ -960,86 +1018,24 @@
                         st.trashAt = now;
                         return;
                     }
-                    traceOnce('pourSlow', '⚠️ rót quá ' + CFG.maxPourMs + 'ms ở ' + pct.toFixed(1) + '% → bỏ qua');
-                    setPhase('top');
+                    traceOnce('pourSlow', '⚠️ rót quá ' + CFG.maxPourMs + 'ms ở ' + pct.toFixed(1) + '% → dán nắp luôn');
+                    setPhase('seal');
                 }
                 return;
             }
 
             releasePour();
-            // QUAN TRỌNG: chỉ chuyển sang 'top' đúng 1 lần khi vừa rót xong.
-            // Nếu setPhase('top') ở đây mỗi tick thì phase 'seal' bị đẩy về 'top'
-            // và nhánh dán nắp không bao giờ chạy được.
-            if (st.phase === 'cup' || st.phase === 'pour') {
+            // rót đạt yêu cầu -> sang dán nắp & giao ly
+            if (st.phase === 'pour') {
                 if (st.lastPhaseLog !== 'pour-ok') {
                     trace('✅ rót xong ' + pct.toFixed(1) + '% (>= ' + st.target.toFixed(1) + '%)' +
-                          ' | hình trong ly=' + cupShapeCount() + ' | kiên nhẫn=' + getPatience());
+                          ' | hình trong ly=' + cupShapeCount() + ' | kiên nhẫn=' + getPatience() +
+                          ' → chuyển sang dán nắp');
                     st.lastPhaseLog = 'pour-ok';
                 }
-                // chụp mốc ngay lúc rót xong. Nếu đợi tới lúc bấm topping mới chụp,
-                // animation nước còn chạy sẽ làm tăng số hình -> tưởng topping đã xong.
-                var p0 = document.getElementById('q3pops');
-                st.popsBefore = p0 ? p0.childElementCount : -1;
-                st.shapesBefore = cupShapeCount();
-                st.topTries = 0;
-                st.lastTop = 0;
-                setPhase('top');
+                setPhase('seal');
             }
 
-            // ---- 3. TOPPING ----
-            if (st.phase === 'top') {
-                // chốt mốc ngay khi vào bước topping, kể cả khi vào bằng đường timeout.
-                // Không có mốc thì shapesBefore = -1 và topping bị coi là xong ngay.
-                if (st.shapesBefore < 0) {
-                    var pz = document.getElementById('q3pops');
-                    st.popsBefore = pz ? pz.childElementCount : -1;
-                    st.shapesBefore = cupShapeCount();
-                    st.topTries = 0;
-                    st.lastTop = 0;
-                    trace('   chụp trước: q3pops=' + st.popsBefore + ' hình trong ly=' + st.shapesBefore);
-                }
-                var top = getWantedTopBtn();
-                var popsNow = document.getElementById('q3pops');
-                var popsCnt = popsNow ? popsNow.childElementCount : -1;
-                var shapeNow = cupShapeCount();
-                if (!top) {
-                    traceOnce('topNo', '⚠️ không tìm thấy nút topping trong #q3zones (order: "' + st.order + '")');
-                    setPhase('seal');
-                    return;
-                }
-                if (toppingSatisfied(top, st)) {
-                    trace('🧋 topping "' + topName(top) + '" XONG sau ' + st.topTries + ' lần bấm' +
-                          ' | pops ' + st.popsBefore + '→' + popsCnt + ' | hình trong ly ' + st.shapesBefore + '→' + shapeNow);
-                    setPhase('seal');
-                } else if (now - st.phaseAt > CFG.toppingMaxMs) {
-                    traceOnce('topTimeout', '⚠️ topping không nhận được sau ' + CFG.toppingMaxMs + 'ms\n' +
-                           '    nút="' + topName(top) + '" class="' + top.className + '"' +
-                           ' | pops ' + st.popsBefore + '→' + popsCnt + ' | hình ' + st.shapesBefore + '→' + shapeNow +
-                           '\n    game đang chờ: "' + (getCoachHint() || '?') + '" → thử sang bước dán nắp');
-                    setPhase('seal');
-                } else if (st.topTries >= CFG.maxToppingTaps) {
-                    traceOnce('topMax', '⚠️ đã bấm topping ' + CFG.maxToppingTaps + ' lần mà ly không đổi' +
-                           ' (pops ' + st.popsBefore + '→' + popsCnt + ', hình trong ly ' + st.shapesBefore + '→' + shapeNow + ')' +
-                           ' | nút="' + topName(top) + '" class="' + top.className + '"\n' +
-                           '    game đang chờ: "' + (getCoachHint() || '?') + '"');
-                    setPhase('seal');
-                } else if (st.topTries === 0 && now - st.phaseAt < CFG.topSettleMs) {
-                    // vừa rót xong, chờ game kịp khoá mực + bật lại nút topping
-                    return;
-                } else if (now - st.lastTop > CFG.tapDelayMs) {
-                    // topping chỉ ăn click, tuyệt đối không đè (đè = trượt hoặc dồn lớp)
-                    var way = (st.topTries % TOP_TOPPING_WAYS.length);
-                    var wname = TOP_TOPPING_WAYS[way].name;
-                    TOP_TOPPING_WAYS[way].run(top);
-                    st.lastTop = now;
-                    st.topTries++;
-                    trace('🧋 thêm topping: "' + topName(top) + '" [' + top.getAttribute('data-a') +
-                          '] lần ' + st.topTries + '/' + CFG.maxToppingTaps + ' bằng [' + wname + ']' +
-                          ' | pops ' + st.popsBefore + ' hình ' + st.shapesBefore +
-                          ' | game chờ: "' + (getCoachHint() || '?') + '"');
-                }
-                return;
-            }
 
             // ---- 4. DÁN NẮP & GIAO LY ----
             if (st.phase === 'seal') {
