@@ -18,8 +18,14 @@ jobs:
 
       - name: Bump version
         run: |
-          NEW="$(date -u +%Y.%m.%d.%H%M)"
+          # dùng số nguyên 14 chữ số (YYYYMMDDHHMMSS) để so sánh được chắc chắn
+          CUR="$(sed -n 's|^// @version *||p' boba-auto.user.js | tr -dc '0-9')"
+          NOW="$(date -u +%Y%m%d%H%M%S)"
+          if [ -z "$CUR" ]; then CUR=0; fi
+          # version PHẢI tăng đơn điệu, nếu đồng hồ bị lùi thì cộng 1
+          if [ "$NOW" -le "$CUR" ]; then NEW="$((CUR + 1))"; else NEW="$NOW"; fi
           sed -i -E "s|^// @version +.*|// @version      ${NEW}|" boba-auto.user.js
+          echo "CUR=${CUR} -> NEW=${NEW}"
           grep '^// @version' boba-auto.user.js
 
       - name: Commit
