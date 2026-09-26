@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho - Tampermonkey Final
 // @namespace    http://tampermonkey.net/
-// @version      20260926151734
+// @version      20260926152247
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -30,8 +30,9 @@
 
         // ---------- phục vụ ----------
         loopMs: 60,
-        pourTargetPct: 'auto',   // 'auto' = đọc vạch xanh .q3ok, nếu lỗi thì 80
-        pourTargetFallback: 80,
+        pourTargetPct: 'auto',   // 'auto' = đọc vạch xanh .q3ok
+        pourMinPct: 82,          // CHỈ dán nắp khi rót đạt tối thiểu mức này
+        pourTargetFallback: 82,  // khi không đọc được .q3ok
         pressRepeatMs: 600,      // giữ nút rót, nhắc lại mỗi 600ms
         maxPourMs: 8000,         // rót quá lâu thì bỏ qua (chống kẹt)
         tapDelayMs: 450,         // giữa 2 lần bấm topping
@@ -70,7 +71,7 @@
             '<button id="btn-diag" style="background:#2980b9; color:white; border:none; padding:8px; border-radius:6px; font-weight:bold; font-size:12px; cursor:pointer; text-align:center;">🔍 Chẩn Đoán DOM</button>' +
             '<hr style="border:0; border-top:1px solid #34495e; margin:4px 0;">' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autocup" checked><b>1. Lấy ly đúng size</b></label></div>' +
-            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autofill" checked><b>2. Rót đúng trà (dừng ở vạch)</b></label></div>' +
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autofill" checked><b>2. Rót đúng trà (≥ 82% mới dán nắp)</b></label></div>' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autotop" checked><b>3. Thêm topping khách gọi</b></label></div>' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autoseal" checked><b>4. Dán nắp &amp; giao ly</b></label></div>' +
             '<hr style="border:0; border-top:1px solid #34495e; margin:4px 0;">' +
@@ -488,7 +489,7 @@
         function freshServe() {
             return {
                 order: null, phase: 'cup', phaseAt: Date.now(),
-                target: null, pressing: null, lastPress: 0,
+                target: null, targetAt: 0, pressing: null, lastPress: 0,
                 lastPct: null, lastPctAt: Date.now(), rate: 0,
                 lastTop: 0, topTries: 0, popsBefore: -1,
                 lastCupClick: 0, trashAt: 0, lastPhaseLog: ''
@@ -535,15 +536,25 @@
             var w = parseFloat(lv.style.width || '0');
             return isFinite(w) ? w : null;
         }
-        function getPourTarget() {
-            if (typeof CFG.pourTargetPct === 'number') return CFG.pourTargetPct;
+        // vạch xanh .q3ok = mức "hoàn hảo" của game, đọc ra được thì dùng
+        function getAutoPourLine() {
             var gauge = document.querySelector('.q3gauge');
             var ok = gauge ? gauge.querySelector('.q3ok') : null;
-            if (ok && gauge && gauge.clientWidth > 0) {
-                var pct = (ok.offsetLeft / gauge.clientWidth) * 100;
-                if (isFinite(pct) && pct > 5 && pct < 100) return pct;
+            if (!ok || !gauge || gauge.clientWidth <= 0) return null;
+            var pct = (ok.offsetLeft / gauge.clientWidth) * 100;
+            return (isFinite(pct) && pct > 5 && pct < 100) ? pct : null;
+        }
+        // mục tiêu rót = max(vạch xanh, pourMinPct) -> không bao giờ dán nắp dưới 82%
+        function getPourTarget() {
+            var t;
+            if (typeof CFG.pourTargetPct === 'number') {
+                t = CFG.pourTargetPct;
+            } else {
+                var auto = getAutoPourLine();
+                if (auto === null) auto = CFG.pourTargetFallback;
+                t = Math.max(auto, CFG.pourMinPct);
             }
-            return CFG.pourTargetFallback;
+            return Math.min(t, 99);
         }
         // game tự đánh dấu hũ trà khách đang gọi bằng class .q3want
         function getWantedTeaBtn() {
@@ -644,9 +655,14 @@
             // ---- 2. RÓT TRÀ ----
             var pct = getPourPct();
             if (pct === null) { releasePour(); return; }
-            if (st.target === null) st.target = getPourTarget();
+            // đọc lại mục tiêu mỗi 500ms: lúc đầu gauge chưa có kích thước thì chưa lấy được vạch xanh
+            if (st.target === null || now - st.targetAt > 500) {
+                st.target = getPourTarget();
+                st.targetAt = now;
+            }
 
-            if (pct < st.target - 1) {
+            // rót tới khi nào pct >= st.target (>= 82% theo CFG.pourMinPct) thì mới sang bước sau
+            if (pct < st.target) {
                 if (!chkPour.checked) { setPhase('top'); return; }
                 st.phase = 'pour';
 
@@ -675,7 +691,8 @@
                     st.pressing = jar;
                     st.lastPress = now;
                     trace('🫗 rót ' + (jar.getAttribute('aria-label') || jar.getAttribute('data-tea')) +
-                          ' → mục tiêu ' + st.target.toFixed(1) + '%');
+                          ' → mục tiêu ' + st.target.toFixed(1) + '%' +
+                          (getAutoPourLine() !== null ? ' (vạch xanh ' + getAutoPourLine().toFixed(1) + '%, tối thiểu ' + CFG.pourMinPct + '%)' : ' (vạch xanh không đọc được, tối thiểu ' + CFG.pourMinPct + '%)'));
                 }
                 if (now - st.phaseAt > CFG.maxPourMs) {
                     releasePour();
@@ -767,7 +784,10 @@
             L.push('order = "' + getOrderText() + '"');
             L.push('phase = ' + SERVE.phase + ' | target = ' + SERVE.target);
             L.push('hasCup = ' + hasCup() + ' | sealed = ' + cupSealed() + ' | size trên ly = ' + getCupSize());
-            L.push('gauge = ' + getPourPct() + '% | target đọc từ .q3ok = ' + getPourTarget().toFixed(1) + '%');
+            L.push('gauge = ' + getPourPct() + '%');
+            L.push('vạch xanh .q3ok = ' + (getAutoPourLine() === null ? 'KHÔNG ĐỌC ĐƯỢC' : getAutoPourLine().toFixed(2) + '%'));
+            L.push('tối thiểu bắt buộc = ' + CFG.pourMinPct + '%');
+            L.push('=> mục tiêu rót = ' + getPourTarget().toFixed(2) + '%  (dán nắp khi >= mức này)');
             var jar = getWantedTeaBtn();
             L.push('hũ trà game yêu cầu = ' + (jar ? jar.id + ' (' + jar.className + ')' : 'KHÔNG CÓ'));
             var top = getWantedTopBtn();
