@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926170757
+// @version      20260926172123
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '34.5',
+        appVersion: '34.6',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -89,6 +89,7 @@
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autofill" checked><b>2. Rót đúng trà (≥ ' + CFG.pourMinPct + '% mới sang bước sau)</b></label></div>' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autotop" checked><b>3. Thêm topping khách gọi (làm trước khi rót)</b></label></div>' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autoseal" checked><b>4. Dán nắp &amp; giao ly</b></label></div>' +
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autodecl" checked><b>5. Từ chối đơn hết món (bấm "mời về")</b></label></div>' +
             '<hr style="border:0; border-top:1px solid #34495e; margin:4px 0;">' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-trace" checked><b>Trace log (tắt khi ổn)</b></label></div>';
         menuEl.appendChild(bodyEl);
@@ -592,6 +593,7 @@
         var chkPour = document.getElementById('chk-autofill');
         var chkTop = document.getElementById('chk-autotop');
         var chkSeal = document.getElementById('chk-autoseal');
+        var chkDecl = document.getElementById('chk-autodecl');
 
         function freshServe() {
             return {
@@ -599,7 +601,7 @@
                 target: null, targetAt: 0, pressing: null, lastPress: 0,
                 lastPct: null, lastPctAt: Date.now(), rate: 0,
                 lastTop: 0, topTries: 0, popsBefore: -1, shapesBefore: -1,
-                sealTries: 0, restarts: 0,
+                sealTries: 0, restarts: 0, declAt: 0,
                 lastCupClick: 0, trashAt: 0, lastPhaseLog: '',
                 spamGuard: {}
             };
@@ -875,6 +877,26 @@
                 st.order = say;
                 if (say) trace('📝 order: "' + say + '"  (kiên nhẫn ' + getPatience() + ')');
             }
+
+            // ---- 0. TỪ CHỐI ĐƠN HẾT MÓN ----
+            // <button class="q3decl" data-decl="51">Hết món, mời về</button>
+            // Khách đang đứng thì bấm để họ về ngay, thay vì đứng chờ hết kiên nhẫn
+            // rồi bị tính là "khách bỏ về" — mất đánh giá và tip.
+            var decl = document.querySelector('#q3say button.q3decl, #q3say [data-decl]');
+            if (decl) {
+                releasePour();
+                if (chkDecl.checked && !decl.disabled && now - (st.declAt || 0) > 1500) {
+                    st.declAt = now;
+                    var dTxt = String(decl.innerText || decl.textContent || '').replace(/\s+/g, ' ').trim();
+                    triggerFullClick(decl);
+                    trace('🚪 bấm "' + (dTxt || 'Hết món, mời về') + '" → bỏ đơn này' +
+                          ' | kiên nhẫn còn ' + getPatience() +
+                          '\n    khách gọi: ' + String(say || '').replace(/\s*Hết món.*$/i, '').trim());
+                }
+                st.phase = 'idle';
+                return;
+            }
+            st.declAt = 0;
 
             var idle = !say || /ngồi chơi|đang chờ khách|chờ khách|hết khách|quán đang vắng|hết món|mời về|đã về|cháu ngủ|ngủ ngon|đã đóng cửa|đóng cửa|nghỉ|is doing nốt đơn/i.test(say);
             if (idle) {
@@ -1231,6 +1253,8 @@
             var sEl = document.getElementById('q3seal');
             if (sEl) L.push('  #q3seal bị che? offsetParent=' + (sEl.offsetParent ? sEl.offsetParent.id || sEl.offsetParent.tagName : 'null') +
                             ' | style=' + sEl.getAttribute('style'));
+            var declEl = document.querySelector('#q3say button.q3decl, #q3say [data-decl]');
+            L.push('nút "Hết món, mời về" = ' + (declEl ? 'CÓ (chưa bấm)' : 'KHÔNG CÓ'));
             var lid = document.querySelector('#q3cup img.q3lid');
             L.push('#q3cup img.q3lid hidden = ' + (lid ? lid.hasAttribute('hidden') : '?'));
             L.push('gauge .q3ok offsetLeft = ' + (document.querySelector('.q3gauge .q3ok') ? document.querySelector('.q3gauge .q3ok').offsetLeft : '?') +
