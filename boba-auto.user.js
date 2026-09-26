@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926160218
+// @version      20260926160640
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '33.7',
+        appVersion: '33.8',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -764,7 +764,20 @@
             trace(msg);
         }
 
+        // bọc try/catch: một lỗi runtime trong 1 tick sẽ KHÔNG giết cả setInterval,
+        // nếu không thì 1 dòng code hỏng làm script chết vĩnh viễn.
         function stepServe() {
+            try { serveTick(); }
+            catch (err) {
+                releasePour();
+                SERVE.crash = (SERVE.crash || 0) + 1;
+                if (SERVE.crash <= CFG.traceRepeatLimit) {
+                    console.error('[BobaAuto] ❌ lỗi ở bước "' + SERVE.phase + '": ' + (err && err.message ? err.message : err));
+                }
+            }
+        }
+
+        function serveTick() {
             if (!selling()) { releasePour(); return; }
             var now = Date.now();
             var say = getOrderText();
@@ -926,6 +939,16 @@
 
             // ---- 3. TOPPING ----
             if (st.phase === 'top') {
+                // chốt mốc ngay khi vào bước topping, kể cả khi vào bằng đường timeout.
+                // Không có mốc thì shapesBefore = -1 và topping bị coi là xong ngay.
+                if (st.shapesBefore < 0) {
+                    var pz = document.getElementById('q3pops');
+                    st.popsBefore = pz ? pz.childElementCount : -1;
+                    st.shapesBefore = cupShapeCount();
+                    st.topTries = 0;
+                    st.lastTop = 0;
+                    trace('   chụp trước: q3pops=' + st.popsBefore + ' hình trong ly=' + st.shapesBefore);
+                }
                 var top = getWantedTopBtn();
                 var popsNow = document.getElementById('q3pops');
                 var popsCnt = popsNow ? popsNow.childElementCount : -1;
@@ -985,13 +1008,18 @@
                 var seal = document.getElementById('q3seal');
                 if (!seal) { st.phase = 'idle'; return; }
                 st.phaseAt = now;
-                // thử lần lượt các kiểu phát event khác nhau, cách nào ăn thì cách đó được dùng lại
-                var si = (st.sealTries - 1) % SEAL_STRATS.length;
-                SEAL_STRATS[si].run(seal);
+                // thử lần lượt các kiểu phát event khác nhau, cách nào ăn thì cách đó được dùng lại.
+                // sealTries bắt đầu từ 0 -> phải dùng chính nó làm chỉ số, trừ 1 sẽ ra -1
+                // và SEAL_STRATS[-1] là undefined (gây crash, dừng cả vòng setInterval).
+                var si = ((st.sealTries % SEAL_STRATS.length) + SEAL_STRATS.length) % SEAL_STRATS.length;
+                var strat = SEAL_STRATS[si];
+                if (!strat || !seal.isConnected) { st.phase = 'idle'; return; }
+                strat.run(seal);
                 st.sealTries++;
                 traceOnce('sealTry', '🔒 dán nắp lần ' + st.sealTries + '/' + CFG.maxSealTries +
-                          ' bằng [' + SEAL_STRATS[si].name + ']' +
+                          ' bằng [' + strat.name + ']' +
                           ' | nắp=' + cupSealed() + ' | kiên nhẫn=' + getPatience() +
+                          ' | ly=' + cupSignal() +
                           ' | game chờ: "' + (getCoachHint() || '?') + '"');
                 return;
             }
