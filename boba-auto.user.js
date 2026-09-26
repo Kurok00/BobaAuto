@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926162258
+// @version      20260926163043
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '34.1',
+        appVersion: '34.2',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -178,13 +178,18 @@
         // ==========================================================
         // 💰 ĐỌC TIỀN — chuẩn hoá về "k" (nghìn)
         // ==========================================================
-        // game dùng kiểu Việt: "1.032k" = 1032k (CHẤM = phân cách nghìn), "2,5k" = 2.5k (PHẨY = thập phân)
+        // game dùng kiểu Việt: "1.032k" = 1032k, "1.852,5k" = 1852.5k (CHẤM = gom nghìn, PHẨY = thập phân)
         function parseViNumber(txt) {
             var t = String(txt).replace(/[\s\u00a0]/g, '');
             if (!t) return NaN;
-            if (/^\d{1,3}([.,]\d{3})+$/.test(t)) return parseInt(t.replace(/[.,]/g, ''), 10);
-            t = t.replace(',', '.');
-            return parseFloat(t);
+            // "1.852,5" / "1,032" / "1.032" -> phần nguyên gom nghìn + phần thập phân (nếu có)
+            var m = t.match(/^(\d{1,3}(?:[.,]\d{3})+)(?:([.,])(\d+))?$/);
+            if (m) {
+                var whole = parseInt(m[1].replace(/[.,]/g, ''), 10);
+                return m[2] ? whole + '.' + m[3] : whole;
+            }
+            // "4,5" -> 4.5 | "77.5" -> 77.5 | "5" -> 5
+            return parseFloat(t.replace(',', '.'));
         }
 
         function toK(str) {
@@ -210,10 +215,10 @@
             var raw = String(el.innerText || el.textContent || '').replace(/[\s\u00a0]/g, '');
             var v = toK(raw);
             if (v === null || v <= 0) return null;
-            // "1.032k" phải ra 1032, không phải 1.032 -> cảnh báo nếu parser sai
-            if (/\.\d{3}k/i.test(raw) && v < 100) {
-                console.warn('[BobaAuto] ⚠️ Đọc ngân sách SAI: "' + raw + '" -> ' + v + 'k. Cần ' +
-                    (parseViNumber(raw) + 'k') + '. Sẽ bỏ qua trần ngân sách cho an toàn.');
+            // "1.032k" phải ra 1032, "1.852,5k" phải ra 1852.5 — cảnh báo nếu vẫn ra số nhỏ
+            if (/\d[.,]\d{3}/.test(raw) && v < 100) {
+                console.warn('[BobaAuto] ⚠️ Đọc ngân sách SAI: "' + raw + '" -> ' + v + 'k. Đáng ra ' +
+                    parseViNumber(raw) + 'k. Bỏ qua trần ngân sách cho an toàn.');
                 return null;
             }
             return v;
@@ -518,7 +523,8 @@
                     console.error('❌ [DỪNG] Chi phí ' + (fin.cost === null ? '?' : fin.cost + 'k') + ', khóa: ' + fin.blocked + ' → KHÔNG bấm NẤU.');
                     return;
                 }
-                console.log('🔥 ' + fin.cost + 'k ≤ ' + budget + 'k → bấm NẤU.');
+                console.log('🔥 ' + (fin.cost === null ? 'không đọc được chi phí' : fin.cost + 'k ≤ ' + budget + 'k') +
+                            (fin.cost === null ? ' (ngân sách ' + budget + 'k, vẫn bấm)' : '') + ' → bấm NẤU.');
                 triggerFullClick(getCookBtn());
                 console.log('==================================================\n');
             } catch (err) {
@@ -829,7 +835,7 @@
                 if (say) trace('📝 order: "' + say + '"  (kiên nhẫn ' + getPatience() + ')');
             }
 
-            var idle = !say || /ngồi chơi|đang chờ khách|chờ khách|hết khách|quán đang vắng|hết món|mời về|đã về|cháu ngủ|ngủ ngon/i.test(say);
+            var idle = !say || /ngồi chơi|đang chờ khách|chờ khách|hết khách|quán đang vắng|hết món|mời về|đã về|cháu ngủ|ngủ ngon|đã đóng cửa|đóng cửa|nghỉ|is doing nốt đơn/i.test(say);
             if (idle) {
                 releasePour();
                 var p = getPourPct();
