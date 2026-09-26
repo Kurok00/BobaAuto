@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926154403
+// @version      20260926154706
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '33.3',
+        appVersion: '33.4',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -528,14 +528,19 @@
         function getZones() { return document.getElementById('q3zones'); }
         function selling() { return document.body.classList.contains('selling'); }
 
-        // Chỉ tin chính #q3cup. Trước đây dùng #q3noCup làm tín hiệu "chưa có ly",
-        // nhưng đó là banner gợi ý, game hay hiện tạm -> tưởng mất ly giữa chừng rồi bấm lại ly.
+        // #q3cup LUÔN tồn tại, kể cả lúc không có ly. Lúc trống game xoá hẳn
+        // <img class="q3lid"> và nhãn size M/L khỏi bên trong nó.
+        // => ly thật = có thẻ nắp HOẶC có nhãn size. Tín hiệu chính xác, không đoán.
         function hasCup() {
             var cup = document.getElementById('q3cup');
             if (!cup) return false;
             if (cup.hasAttribute('hidden') || cup.style.display === 'none') return false;
             if (!cup.getClientRects || !cup.getClientRects().length) return false;
-            return true;
+            if (cup.querySelector('img.q3lid')) return true;
+            if (getCupSize() !== null) return true;
+            var noCup = document.getElementById('q3noCup');
+            if (noCup && isVisible(noCup)) return false;
+            return false;
         }
         function cupSealed() {
             var cup = document.getElementById('q3cup');
@@ -785,7 +790,18 @@
                 }
                 if (now - st.phaseAt > CFG.maxPourMs) {
                     releasePour();
-                    trace('⚠️ rót quá ' + CFG.maxPourMs + 'ms, bỏ qua');
+                    if (pct < 5) {
+                        // gauge đứng 0% suốt 8s => ly không nhận được nước, ly này hỏng
+                        traceOnce('pourDead', '⚠️ rót 8s mà gauge vẫn ' + pct.toFixed(1) + '% → đổ ly, lấy lại');
+                        var trash2 = document.getElementById('q3trash');
+                        if (trash2) triggerFullClick(trash2);
+                        st.phase = 'cup';
+                        st.phaseAt = now;
+                        st.lastCupClick = 0;
+                        st.trashAt = now;
+                        return;
+                    }
+                    traceOnce('pourSlow', '⚠️ rót quá ' + CFG.maxPourMs + 'ms ở ' + pct.toFixed(1) + '% → bỏ qua');
                     setPhase('top');
                 }
                 return;
@@ -906,6 +922,8 @@
             L.push('order = "' + getOrderText() + '"');
             L.push('phase = ' + SERVE.phase + ' | target = ' + SERVE.target);
             L.push('hasCup = ' + hasCup() + ' | sealed = ' + cupSealed() + ' | size trên ly = ' + getCupSize());
+            L.push('  -> có <img class="q3lid"> trong #q3cup: ' +
+                   (document.querySelector('#q3cup img.q3lid') ? 'CÓ (ly thật)' : 'KHÔNG (ly rỗng)'));
             L.push('gauge = ' + getPourPct() + '%');
             L.push('vạch xanh .q3ok = ' + (getAutoPourLine() === null ? 'KHÔNG ĐỌC ĐƯỢC' : getAutoPourLine().toFixed(2) + '%'));
             L.push('tối thiểu bắt buộc = ' + CFG.pourMinPct + '%');
