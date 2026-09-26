@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926153726
+// @version      20260926154210
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '33.1',
+        appVersion: '33.2',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -528,11 +528,14 @@
         function getZones() { return document.getElementById('q3zones'); }
         function selling() { return document.body.classList.contains('selling'); }
 
+        // Chỉ tin chính #q3cup. Trước đây dùng #q3noCup làm tín hiệu "chưa có ly",
+        // nhưng đó là banner gợi ý, game hay hiện tạm -> tưởng mất ly giữa chừng rồi bấm lại ly.
         function hasCup() {
-            var noCup = document.getElementById('q3noCup');
-            if (noCup && isVisible(noCup)) return false;
             var cup = document.getElementById('q3cup');
-            return !!(cup && cup.getClientRects && cup.getClientRects().length);
+            if (!cup) return false;
+            if (cup.hasAttribute('hidden') || cup.style.display === 'none') return false;
+            if (!cup.getClientRects || !cup.getClientRects().length) return false;
+            return true;
         }
         function cupSealed() {
             var cup = document.getElementById('q3cup');
@@ -700,7 +703,13 @@
             // ---- 1. LẤY LY ----
             if (!hasCup()) {
                 releasePour();
+                if (st.phase !== 'cup') traceOnce('cupLost', '🗑️ mất ly giữa chừng → lấy ly lại');
                 st.phase = 'cup';
+                st.phaseAt = now;
+                st.target = null;      // đọc lại vạch xanh cho ly mới
+                st.rate = 0;
+                st.lastPct = null;
+                st.lastPhaseLog = '';
                 if (chkCup.checked && now - st.lastCupClick > CFG.cupClickGapMs) {
                     var want = getWantedSize(say);
                     if (want) {
@@ -738,15 +747,21 @@
             // rót tới khi nào pct >= st.target (>= 82% theo CFG.pourMinPct) thì mới sang bước sau
             if (pct < st.target) {
                 if (!chkPour.checked) { setPhase('top'); return; }
-                st.phase = 'pour';
+                // mới vào bước rót thì reset đồng hồ 8s + tốc độ cũ (ly vừa lấy/lấy lại)
+                if (st.phase !== 'pour') {
+                    st.phase = 'pour';
+                    st.phaseAt = now;
+                    st.rate = 0;
+                    st.lastPct = pct;
+                    st.lastPctAt = now;
+                    st.lastPress = 0;
+                }
 
                 // đo tốc độ để thả tay đúng vạch, không bơm quá
                 if (st.lastPct !== null && now - st.lastPctAt > 30) {
                     st.rate = (pct - st.lastPct) / (now - st.lastPctAt);
                     st.lastPct = pct;
                     st.lastPctAt = now;
-                } else if (st.lastPct === null) {
-                    st.lastPct = pct; st.lastPctAt = now;
                 }
                 var predicted = pct + st.rate * (CFG.loopMs * 1.5);
 
