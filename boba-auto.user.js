@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926154210
+// @version      20260926154403
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '33.2',
+        appVersion: '33.3',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -36,8 +36,8 @@
         // ---------- phục vụ ----------
         loopMs: 60,
         pourTargetPct: 'auto',   // 'auto' = đọc vạch xanh .q3ok
-        pourMinPct: 82,          // CHỈ dán nắp khi rót đạt tối thiểu mức này
-        pourTargetFallback: 82,  // khi không đọc được .q3ok
+        pourMinPct: 80,          // CHỈ dán nắp khi rót đạt tối thiểu mức này
+        pourTargetFallback: 80,  // khi không đọc được .q3ok
         pressRepeatMs: 600,      // giữ nút rót, nhắc lại mỗi 600ms
         maxPourMs: 8000,         // rót quá lâu thì bỏ qua (chống kẹt)
         tapDelayMs: 450,         // giữa 2 lần bấm topping
@@ -83,7 +83,7 @@
             '<button id="btn-diag" style="background:#2980b9; color:white; border:none; padding:8px; border-radius:6px; font-weight:bold; font-size:12px; cursor:pointer; text-align:center;">🔍 Chẩn Đoán DOM</button>' +
             '<hr style="border:0; border-top:1px solid #34495e; margin:4px 0;">' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autocup" checked><b>1. Lấy ly đúng size</b></label></div>' +
-            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autofill" checked><b>2. Rót đúng trà (≥ 82% mới dán nắp)</b></label></div>' +
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autofill" checked><b>2. Rót đúng trà (≥ 80% mới dán nắp)</b></label></div>' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autotop" checked><b>3. Thêm topping khách gọi</b></label></div>' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autoseal" checked><b>4. Dán nắp &amp; giao ly</b></label></div>' +
             '<hr style="border:0; border-top:1px solid #34495e; margin:4px 0;">' +
@@ -571,7 +571,7 @@
             var pct = (ok.offsetLeft / gauge.clientWidth) * 100;
             return (isFinite(pct) && pct > 5 && pct < 100) ? pct : null;
         }
-        // mục tiêu rót = max(vạch xanh, pourMinPct) -> không bao giờ dán nắp dưới 82%
+        // mục tiêu rót = max(vạch xanh, pourMinPct) -> không bao giờ dán nắp dưới mức tối thiểu
         function getPourTarget() {
             var t;
             if (typeof CFG.pourTargetPct === 'number') {
@@ -744,7 +744,7 @@
                 st.targetAt = now;
             }
 
-            // rót tới khi nào pct >= st.target (>= 82% theo CFG.pourMinPct) thì mới sang bước sau
+            // rót tới khi nào pct >= st.target (>= pourMinPct) thì mới sang bước sau
             if (pct < st.target) {
                 if (!chkPour.checked) { setPhase('top'); return; }
                 // mới vào bước rót thì reset đồng hồ 8s + tốc độ cũ (ly vừa lấy/lấy lại)
