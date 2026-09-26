@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926160640
+// @version      20260926161449
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '33.8',
+        appVersion: '33.9',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -40,11 +40,14 @@
         pourTargetFallback: 80,  // khi không đọc được .q3ok
         pressRepeatMs: 600,      // giữ nút rót, nhắc lại mỗi 600ms
         maxPourMs: 8000,         // rót quá lâu thì bỏ qua (chống kẹt)
-        tapDelayMs: 450,         // giữa 2 lần bấm topping
-        maxToppingTaps: 3,       // tối đa bấm topping mấy lần, tránh dư
-        toppingMaxMs: 3000,      // topping thêm mãi không được thì bỏ qua
-        sealDelayMs: 400,        // chờ trước khi dán nắp
+        topSettleMs: 600,        // chờ game "xong rót" trước khi bấm topping lần đầu
+        tapDelayMs: 700,         // giữa 2 lần bấm topping
+        maxToppingTaps: 4,       // tối đa bấm topping mấy lần, tránh dư
+        toppingMaxMs: 4000,      // topping thêm mãi không được thì bỏ qua
+        sealDelayMs: 500,        // chờ trước khi dán nắp
         maxSealTries: 5,         // thử 5 kiểu bấm dán nắp trước khi quay lại làm topping
+        stuckMs: 20000,          // bước nào đứng quá lâu thì coi là kẹt, đổ ly làm lại
+        maxRestarts: 4,          // liên tục đổ ly quá số lần thì dừng, báo lỗi
         traceRepeatLimit: 4,     // tránh log spam khi máy trạng thái lặp
         cupClickGapMs: 700
     };
@@ -549,7 +552,7 @@
                 target: null, targetAt: 0, pressing: null, lastPress: 0,
                 lastPct: null, lastPctAt: Date.now(), rate: 0,
                 lastTop: 0, topTries: 0, popsBefore: -1, shapesBefore: -1,
-                sealTries: 0,
+                sealTries: 0, restarts: 0,
                 lastCupClick: 0, trashAt: 0, lastPhaseLog: '',
                 spamGuard: {}
             };
@@ -719,6 +722,12 @@
             { name: 'mouse down/up + click',  run: function (el) { fire(el, ['mousedown'], 'down'); fire(el, ['mouseup'], 'up'); fire(el, ['click'], 'up'); } },
             { name: 'giữ 150ms',           run: function (el) { startPress(el); setTimeout(function () { stopPress(el); }, 150); } }
         ];
+        // thêm topping = BẤM (click), KHÔNG đè/giữ. Đè sẽ không ăn, hoặc dồn nhiều lớp.
+        var TOP_TOPPING_WAYS = [
+            { name: 'pointer+mouse+click', run: function (el) { triggerFullClick(el); } },
+            { name: 'click() thuần',         run: function (el) { try { el.click(); } catch (e) { triggerFullClick(el); } } }
+        ];
+
         // game tự nói đang chờ bước nào - quan trọng nhất để biết vì sao bấm không ăn
         function getCoachHint() {
             var c = document.getElementById('q3coach');
@@ -780,6 +789,36 @@
         function serveTick() {
             if (!selling()) { releasePour(); return; }
             var now = Date.now();
+
+            // ---- WATCHDOG: bước đứng quá lâu thì tự thoát, không để treo vô hạn ----
+            if (SERVE.phase !== 'cup' && SERVE.phase !== 'idle' && now - SERVE.phaseAt > CFG.stuckMs) {
+                releasePour();
+                SERVE.restarts = (SERVE.restarts || 0) + 1;
+                trace('🚨 KẸT ở bước "' + SERVE.phase + '" quá ' + Math.round((now - SERVE.phaseAt) / 1000) + 's' +
+                      ' (giữa chừng) — lần đổ ly thứ ' + SERVE.restarts +
+                      '\n    order: "' + (SERVE.order || '?') + '" | ly: ' + cupSignal() +
+                      '\n    game đang chờ: "' + (getCoachHint() || '?') + '" | kiên nhẫn: ' + getPatience() +
+                      '\n    hũ trà: ' + (getWantedTeaBtn() ? 'có' : 'KHÔNG CÓ') +
+                      ' | nút topping: ' + (getWantedTopBtn() ? 'có' : 'KHÔNG CÓ'));
+                if (SERVE.restarts >= CFG.maxRestarts) {
+                    trace('🛑 ĐÃ ĐỔ LY ' + SERVE.restarts + ' LẦN LIÊN TIẾP → DỪNG phục vụ để khỏi đốt hàng.' +
+                          '\n    Báo lại giúp tao dòng trên, kèm ảnh chụp màn hình lúc đang kẹt.');
+                    SERVE.phase = 'idle';
+                    SERVE.restarts = 0;
+                    return;
+                }
+                var trw = document.getElementById('q3trash');
+                if (trw) triggerFullClick(trw);
+                SERVE.phase = 'cup';
+                SERVE.phaseAt = now;
+                SERVE.trashAt = now;
+                SERVE.lastCupClick = 0;
+                SERVE.target = null;
+                SERVE.rate = 0;
+                SERVE.lastPct = null;
+                SERVE.lastPhaseLog = '';
+                return;
+            }
             var say = getOrderText();
             var st = SERVE;
 
@@ -810,13 +849,23 @@
             // ---- 1. LẤY LY ----
             if (!hasCup()) {
                 releasePour();
-                if (st.phase !== 'cup') traceOnce('cupLost', '🗑️ mất ly giữa chừng → lấy ly lại');
+                if (st.phase !== 'cup') { traceOnce('cupLost', '🗑️ mất ly giữa chừng → lấy ly lại'); st.cupSince = now; }
                 st.phase = 'cup';
                 st.phaseAt = now;
                 st.target = null;      // đọc lại vạch xanh cho ly mới
                 st.rate = 0;
                 st.lastPct = null;
                 st.lastPhaseLog = '';
+                // lấy ly mà mãi không được thì bỏ đơn này, đừng bấm vô tận
+                if (!st.cupSince) st.cupSince = now;
+                if (now - st.cupSince > CFG.stuckMs) {
+                    trace('🛑 Không lấy được ly sau ' + Math.round((now - st.cupSince) / 1000) + 's' +
+                          ' (bấm #q3_M/' + (getWantedSize(say) || '?') + ' không ăn) — bỏ qua đơn này.' +
+                          '\n    ly: ' + cupSignal() + ' | game chờ: "' + (getCoachHint() || '?') + '"');
+                    st.cupSince = 0;
+                    st.phase = 'idle';
+                    return;
+                }
                 if (chkCup.checked && now - st.lastCupClick > CFG.cupClickGapMs) {
                     var want = getWantedSize(say);
                     if (want) {
@@ -953,13 +1002,20 @@
                 var popsNow = document.getElementById('q3pops');
                 var popsCnt = popsNow ? popsNow.childElementCount : -1;
                 var shapeNow = cupShapeCount();
-                if (!top) { traceOnce('topNo', '⚠️ không tìm thấy nút topping trong #q3zones'); setPhase('seal'); return; }
+                if (!top) {
+                    traceOnce('topNo', '⚠️ không tìm thấy nút topping trong #q3zones (order: "' + st.order + '")');
+                    setPhase('seal');
+                    return;
+                }
                 if (toppingSatisfied(top, st)) {
                     trace('🧋 topping "' + topName(top) + '" XONG sau ' + st.topTries + ' lần bấm' +
                           ' | pops ' + st.popsBefore + '→' + popsCnt + ' | hình trong ly ' + st.shapesBefore + '→' + shapeNow);
                     setPhase('seal');
                 } else if (now - st.phaseAt > CFG.toppingMaxMs) {
-                    traceOnce('topTimeout', '⚠️ topping không nhận được sau ' + CFG.toppingMaxMs + 'ms → bỏ qua');
+                    traceOnce('topTimeout', '⚠️ topping không nhận được sau ' + CFG.toppingMaxMs + 'ms\n' +
+                           '    nút="' + topName(top) + '" class="' + top.className + '"' +
+                           ' | pops ' + st.popsBefore + '→' + popsCnt + ' | hình ' + st.shapesBefore + '→' + shapeNow +
+                           '\n    game đang chờ: "' + (getCoachHint() || '?') + '" → thử sang bước dán nắp');
                     setPhase('seal');
                 } else if (st.topTries >= CFG.maxToppingTaps) {
                     traceOnce('topMax', '⚠️ đã bấm topping ' + CFG.maxToppingTaps + ' lần mà ly không đổi' +
@@ -967,32 +1023,49 @@
                            ' | nút="' + topName(top) + '" class="' + top.className + '"\n' +
                            '    game đang chờ: "' + (getCoachHint() || '?') + '"');
                     setPhase('seal');
+                } else if (st.topTries === 0 && now - st.phaseAt < CFG.topSettleMs) {
+                    // vừa rót xong, chờ game kịp khoá mực + bật lại nút topping
+                    return;
                 } else if (now - st.lastTop > CFG.tapDelayMs) {
-                    traceOnce('topFirst', '   chụp trước: q3pops=' + st.popsBefore + ' hình trong ly=' + st.shapesBefore +
-                          ' | nút class="' + top.className + '"');
-                    // bấm kiểu click (pointerdown→pointerup→click). Bấm-hold 220ms trước đây
-                    // hay bị game bỏ qua, hoặc dồn nhiều topping vào cùng 1 ly.
-                    triggerFullClick(top);
+                    // topping chỉ ăn click, tuyệt đối không đè (đè = trượt hoặc dồn lớp)
+                    var way = (st.topTries % TOP_TOPPING_WAYS.length);
+                    var wname = TOP_TOPPING_WAYS[way].name;
+                    TOP_TOPPING_WAYS[way].run(top);
                     st.lastTop = now;
                     st.topTries++;
                     trace('🧋 thêm topping: "' + topName(top) + '" [' + top.getAttribute('data-a') +
-                          '] lần ' + st.topTries + '/' + CFG.maxToppingTaps + ' (pops ' + st.popsBefore +
-                          ' hình ' + st.shapesBefore + ')');
+                          '] lần ' + st.topTries + '/' + CFG.maxToppingTaps + ' bằng [' + wname + ']' +
+                          ' | pops ' + st.popsBefore + ' hình ' + st.shapesBefore +
+                          ' | game chờ: "' + (getCoachHint() || '?') + '"');
                 }
                 return;
             }
 
             // ---- 4. DÁN NẮP & GIAO LY ----
             if (st.phase === 'seal') {
-                if (cupSealed()) { trace('✅ ly đã có nắp -> xong 1 ly'); st.phase = 'idle'; return; }
+                if (cupSealed()) {
+                    trace('✅ ly đã có nắp -> xong 1 ly');
+                    st.phase = 'idle';
+                    st.restarts = 0;
+                    return;
+                }
                 // đơn hàng đổi rồi = đã giao cho khách mới, vòng reset sẽ xử lý
                 if (getOrderText() !== st.order) { st.phase = 'idle'; return; }
                 if (now - st.phaseAt < CFG.sealDelayMs) return;
                 if (!chkSeal.checked) { st.phase = 'idle'; return; }
                 if (st.sealTries >= CFG.maxSealTries) {
+                    st.restarts = (st.restarts || 0) + 1;
                     traceOnce('sealFail', '⚠️ đã thử ' + CFG.maxSealTries + ' cách bấm dán nắp, ly vẫn chưa xong.\n' +
-                           '    game đang chờ: "' + (getCoachHint() || '?') + '" | ly: ' + cupSignal() + '\n' +
-                           '    → đổ ly này, KHÔNG bấm topping lại (tránh dồn 2 lớp)');
+                           '    game đang chờ: "' + (getCoachHint() || '?') + '" | ly: ' + cupSignal() +
+                           ' | topping trong ly: ' + (st.shapesBefore >= 0 ? cupShapeCount() - st.shapesBefore : '?') + ' hình' +
+                           ' | topping khách gọi: ' + (getWantedTopBtn() ? topName(getWantedTopBtn()) : 'KHÔNG CÓ') +
+                           '\n    → đổ ly này (lần ' + st.restarts + '), KHÔNG bấm topping lại (tránh dồn 2 lớp)');
+                    if (st.restarts >= CFG.maxRestarts) {
+                        trace('🛑 ĐÃ ĐỔ LY ' + st.restarts + ' LẦN LIÊN TIẾP → DỪNG phục vụ để khỏi đốt hàng.');
+                        st.phase = 'idle';
+                        st.restarts = 0;
+                        return;
+                    }
                     var tr3 = document.getElementById('q3trash');
                     if (tr3) triggerFullClick(tr3);
                     st.trashAt = now;
