@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926161818
+// @version      20260926162258
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '34.0',
+        appVersion: '34.1',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -36,8 +36,8 @@
         // ---------- phục vụ ----------
         loopMs: 60,
         pourTargetPct: 'auto',   // 'auto' = đọc vạch xanh .q3ok
-        pourMinPct: 80,          // CHỈ dán nắp khi rót đạt tối thiểu mức này
-        pourTargetFallback: 80,  // khi không đọc được .q3ok
+        pourMinPct: 83,          // CHỈ dán nắp khi rót đạt tối thiểu mức này
+        pourTargetFallback: 83,  // khi không đọc được .q3ok
         pressRepeatMs: 600,      // giữ nút rót, nhắc lại mỗi 600ms
         maxPourMs: 8000,         // rót quá lâu thì bỏ qua (chống kẹt)
         topSettleMs: 600,        // chờ game "xong rót" trước khi bấm topping lần đầu
