@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926152721
+// @version      20260926153726
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '33.0',
+        appVersion: '33.1',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -41,10 +41,12 @@
         pressRepeatMs: 600,      // giữ nút rót, nhắc lại mỗi 600ms
         maxPourMs: 8000,         // rót quá lâu thì bỏ qua (chống kẹt)
         tapDelayMs: 450,         // giữa 2 lần bấm topping
-        toppingHoldMs: 140,      // giữ nút topping (chịu được cả tap lẫn hold)
-        maxToppingTaps: 2,       // tối đa bấm topping mấy lần, tránh dư
-        toppingMaxMs: 2500,      // topping thêm mãi không được thì bỏ qua
+        toppingHoldMs: 260,      // giữ nút topping (chịu được cả tap lẫn hold)
+        maxToppingTaps: 3,       // tối đa bấm topping mấy lần, tránh dư
+        toppingMaxMs: 3000,      // topping thêm mãi không được thì bỏ qua
         sealDelayMs: 400,        // chờ trước khi dán nắp
+        maxSealTries: 3,         // bấm dán nắp mấy lần trước khi quay lại làm topping
+        traceRepeatLimit: 4,     // tránh log spam khi máy trạng thái lặp
         cupClickGapMs: 700
     };
 
@@ -137,22 +139,32 @@
         document.getElementById('mod-close-btn').addEventListener('click', function() { menuEl.style.display = 'none'; });
 
         // ---------------- sự kiện giả ----------------
-        function fire(el, types) {
+        // pointerdown/pointerup phải là PointerEvent thật, nếu dùng MouseEvent
+        // thì e.pointerId / e.isPrimary đều undefined và game có thể bỏ qua.
+        function makeEvent(type, phase) {
+            if (type.indexOf('touch') === 0) return new Event(type, { bubbles: true, cancelable: true });
+            if (type.indexOf('pointer') === 0 && typeof PointerEvent === 'function') {
+                return new PointerEvent(type, {
+                    bubbles: true, cancelable: true, view: window,
+                    pointerId: 1, isPrimary: true, pointerType: 'mouse',
+                    button: 0, buttons: phase === 'down' ? 1 : 0,
+                    clientX: 0, clientY: 0
+                });
+            }
+            return new MouseEvent(type, { bubbles: true, cancelable: true, view: window, button: 0 });
+        }
+        function fire(el, types, phase) {
             if (!el || el.isConnected === false) return;
             for (var i = 0; i < types.length; i++) {
-                try {
-                    var ev = types[i].indexOf('touch') === 0
-                        ? new Event(types[i], { bubbles: true, cancelable: true })
-                        : new MouseEvent(types[i], { bubbles: true, cancelable: true, view: window });
-                    el.dispatchEvent(ev);
-                } catch (e) {}
+                try { el.dispatchEvent(makeEvent(types[i], phase || 'down')); } catch (e) {}
             }
         }
         function triggerFullClick(el) {
-            fire(el, ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'touchstart', 'touchend']);
+            fire(el, ['pointerdown', 'mousedown'], 'down');
+            fire(el, ['pointerup', 'mouseup', 'click', 'touchstart', 'touchend'], 'up');
         }
-        function startPress(el) { fire(el, ['pointerdown', 'mousedown', 'touchstart']); }
-        function stopPress(el) { fire(el, ['pointerup', 'mouseup', 'touchend', 'click']); }
+        function startPress(el) { fire(el, ['pointerdown', 'mousedown', 'touchstart'], 'down'); }
+        function stopPress(el) { fire(el, ['pointerup', 'mouseup', 'touchend', 'click'], 'up'); }
 
         function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
@@ -501,8 +513,10 @@
                 order: null, phase: 'cup', phaseAt: Date.now(),
                 target: null, targetAt: 0, pressing: null, lastPress: 0,
                 lastPct: null, lastPctAt: Date.now(), rate: 0,
-                lastTop: 0, topTries: 0, popsBefore: -1,
-                lastCupClick: 0, trashAt: 0, lastPhaseLog: ''
+                lastTop: 0, topTries: 0, popsBefore: -1, shapesBefore: -1,
+                sealTries: 0,
+                lastCupClick: 0, trashAt: 0, lastPhaseLog: '',
+                spamGuard: {}
             };
         }
         var SERVE = freshServe();
@@ -566,6 +580,18 @@
             }
             return Math.min(t, 99);
         }
+        function norm(s) {
+            return String(s || '').toLowerCase()
+                .replace(/[àáảãạăằắẳẵặâầấẩẫậ]/g, 'a')
+                .replace(/[èéẻẽẹêềếểễệ]/g, 'e')
+                .replace(/[ìíỉĩị]/g, 'i')
+                .replace(/[òóỏõọôồốổỗộơờớởỡợ]/g, 'o')
+                .replace(/[ùúủũụưừứửữự]/g, 'u')
+                .replace(/[ỳýỷỹỵ]/g, 'y')
+                .replace(/đ/g, 'd')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
         // game tự đánh dấu hũ trà khách đang gọi bằng class .q3want
         function getWantedTeaBtn() {
             var z = getZones();
@@ -578,12 +604,40 @@
                 var b = z.querySelector('.q3jar[data-tea="' + TEAS[i].key + '"]:not(.q3lock)');
                 if (b) return b;
             }
-            return null;
+            // cuối cùng: khớp aria-label của hũ với text đơn hàng
+            return matchByLabel(z, '.q3jar[data-tea]:not(.q3lock)', say, /^gi[uû]\s*đ[eê]\s*r[oó]t\s*/i);
         }
-        // topping cũng được đánh dấu .q3want, phân biệt bằng data-a^="top:"
+        // topping: ưu tiên .q3want, nếu không có thì khớp aria-label với text đơn hàng
         function getWantedTopBtn() {
             var z = getZones();
-            return z ? z.querySelector('.q3z.q3want[data-a^="top:"]:not(.q3lock)') : null;
+            if (!z) return null;
+            var mark = z.querySelector('.q3z.q3want[data-a^="top:"]:not(.q3lock)');
+            if (mark) return mark;
+            return matchByLabel(z, '.q3z[data-a^="top:"]:not(.q3lock)', getOrderText(), null);
+        }
+        // chọn nút có aria-label dài nhất mà text đơn hàng chứa nhiều nhất
+        function matchByLabel(z, sel, say, stripRe) {
+            var hay = norm(say);
+            if (!hay) return null;
+            var best = null, bestLen = 0;
+            var btns = z.querySelectorAll(sel);
+            for (var i = 0; i < btns.length; i++) {
+                var raw = btns[i].getAttribute('aria-label') || '';
+                if (stripRe) raw = raw.replace(stripRe, ' ');
+                var lbl = norm(raw);
+                if (lbl.length < 4) continue;
+                if (hay.indexOf(lbl) === -1) continue;
+                if (lbl.length > bestLen) { bestLen = lbl.length; best = btns[i]; }
+            }
+            return best;
+        }
+        // số hình vẽ trong ly (nước + topping) - dùng để xác nhận topping đã vào ly
+        function cupShapeCount() {
+            var cup = document.getElementById('q3cup');
+            if (!cup) return -1;
+            var gs = cup.querySelectorAll('svg g[clip-path]'), n = 0;
+            for (var i = 0; i < gs.length; i++) n += gs[i].childElementCount;
+            return n;
         }
         function topName(btn) {
             return btn ? (btn.getAttribute('aria-label') || btn.id || '?') : '?';
@@ -592,9 +646,9 @@
             if (!top) return true;
             if (top.hasAttribute('hidden') || top.style.display === 'none') return true;
             if (/q3on|q3done|q3used|q3had/.test(top.className)) return true;
-            if (!/\bq3want\b/.test(top.className)) return true;
             var pops = document.getElementById('q3pops');
             if (pops && st.popsBefore >= 0 && pops.childElementCount > st.popsBefore) return true;
+            if (st.shapesBefore >= 0 && cupShapeCount() > st.shapesBefore) return true;
             return false;
         }
 
@@ -605,7 +659,17 @@
             if (SERVE.phase === p) return;
             SERVE.phase = p;
             SERVE.phaseAt = Date.now();
-            trace('→ ' + p + (note ? ' (' + note + ')' : ''));
+            traceOnce('phase:' + p, '→ ' + p + (note ? ' (' + note + ')' : ''));
+        }
+        // chống log spam: cùng 1 thông điệp chỉ in tối đa traceRepeatLimit lần
+        function traceOnce(key, msg) {
+            var g = SERVE.spamGuard;
+            g[key] = (g[key] || 0) + 1;
+            if (g[key] > CFG.traceRepeatLimit) {
+                if (g[key] === CFG.traceRepeatLimit + 1) trace('⚠️ "' + msg + '" lặp quá nhiều, tắt log. Có thể game đang chặn thao tác này.');
+                return;
+            }
+            trace(msg);
         }
 
         function stepServe() {
@@ -713,8 +777,16 @@
             }
 
             releasePour();
-            if (st.lastPhaseLog !== 'pour-ok') { trace('✅ rót xong ' + pct.toFixed(1) + '% (>= ' + st.target.toFixed(1) + '%)'); st.lastPhaseLog = 'pour-ok'; }
-            setPhase('top');
+            // QUAN TRỌNG: chỉ chuyển sang 'top' đúng 1 lần khi vừa rót xong.
+            // Nếu setPhase('top') ở đây mỗi tick thì phase 'seal' bị đẩy về 'top'
+            // và nhánh dán nắp không bao giờ chạy được.
+            if (st.phase === 'cup' || st.phase === 'pour') {
+                if (st.lastPhaseLog !== 'pour-ok') {
+                    trace('✅ rót xong ' + pct.toFixed(1) + '% (>= ' + st.target.toFixed(1) + '%)');
+                    st.lastPhaseLog = 'pour-ok';
+                }
+                setPhase('top');
+            }
 
             // ---- 3. TOPPING ----
             if (st.phase === 'top') {
@@ -723,31 +795,55 @@
                     if (top) trace('🧋 topping "' + topName(top) + '" đã xong sau ' + st.topTries + ' lần bấm');
                     setPhase('seal');
                 } else if (now - st.phaseAt > CFG.toppingMaxMs) {
-                    trace('⚠️ topping không nhận được sau ' + CFG.toppingMaxMs + 'ms → bỏ qua');
+                    traceOnce('topTimeout', '⚠️ topping không nhận được sau ' + CFG.toppingMaxMs + 'ms → bỏ qua');
                     setPhase('seal');
                 } else if (st.topTries >= CFG.maxToppingTaps) {
-                    trace('⚠️ đã bấm topping ' + CFG.maxToppingTaps + ' lần → bỏ qua');
+                    traceOnce('topMax', '⚠️ đã bấm topping ' + CFG.maxToppingTaps + ' lần mà ly không đổi (pops=' + st.popsBefore +
+                           '→' + (document.getElementById('q3pops') ? document.getElementById('q3pops').childElementCount : '?') +
+                           ', hình trong ly=' + st.shapesBefore + '→' + cupShapeCount() + ') → bỏ qua');
                     setPhase('seal');
                 } else if (now - st.lastTop > CFG.tapDelayMs) {
-                    var pops = document.getElementById('q3pops');
-                    if (st.topTries === 0) st.popsBefore = pops ? pops.childElementCount : -1;
-                    // giữ ~140ms: chịu được cả handler bấm lẫn handler giữ
+                    if (st.topTries === 0) {
+                        var pops = document.getElementById('q3pops');
+                        st.popsBefore = pops ? pops.childElementCount : -1;
+                        st.shapesBefore = cupShapeCount();
+                        trace('   chụp trước: q3pops=' + st.popsBefore + ' hình trong ly=' + st.shapesBefore);
+                    }
+                    // giữ ~220ms: chịu được cả handler bấm lẫn handler giữ
                     startPress(top);
                     setTimeout(function() { stopPress(top); }, CFG.toppingHoldMs);
                     st.lastTop = now;
                     st.topTries++;
-                    trace('🧋 thêm topping: ' + topName(top) + ' (lần ' + st.topTries + '/' + CFG.maxToppingTaps + ')');
+                    trace('🧋 thêm topping: "' + topName(top) + '" [' + top.getAttribute('data-a') +
+                          '] lần ' + st.topTries + '/' + CFG.maxToppingTaps);
                 }
                 return;
             }
 
             // ---- 4. DÁN NẮP & GIAO LY ----
             if (st.phase === 'seal') {
+                if (cupSealed()) { trace('✅ ly đã có nắp -> xong 1 ly'); st.phase = 'idle'; return; }
+                // đơn hàng đổi rồi = đã giao cho khách mới, vòng reset sẽ xử lý
+                if (getOrderText() !== st.order) { st.phase = 'idle'; return; }
                 if (now - st.phaseAt < CFG.sealDelayMs) return;
                 if (!chkSeal.checked) { st.phase = 'idle'; return; }
+                if (st.sealTries >= CFG.maxSealTries) {
+                    traceOnce('sealFail', '⚠️ bấm dán nắp ' + CFG.maxSealTries + ' lần mà ly chưa có nắp → quay lại làm topping');
+                    st.sealTries = 0;
+                    st.topTries = 0;
+                    st.popsBefore = -1;
+                    st.shapesBefore = -1;
+                    st.spamGuard = {};
+                    setPhase('top');
+                    return;
+                }
                 var seal = document.getElementById('q3seal');
-                if (seal) { triggerFullClick(seal); trace('✅ dán nắp & giao ly'); }
-                st.phase = 'idle';
+                if (!seal) { st.phase = 'idle'; return; }
+                st.phaseAt = now;
+                st.sealTries++;
+                triggerFullClick(seal);
+                traceOnce('sealTry', '🔒 bấm dán nắp lần ' + st.sealTries + '/' + CFG.maxSealTries +
+                          ' (ly có nắp: ' + cupSealed() + ')');
                 return;
             }
         }
