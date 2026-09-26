@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Auto Tiem Tra Nho - Tampermonkey Final
+// @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926152247
+// @version      20260926152721
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -18,6 +18,11 @@
     'use strict';
 
     var CFG = {
+        // ---------- hiển thị ----------
+        // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
+        // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
+        appVersion: '33.0',
+
         // ---------- kho ----------
         fallbackBudget: 50,
         clickDelay: 40,
@@ -44,7 +49,12 @@
     };
 
     function initMod() {
-        if (document.getElementById('mod-menu')) return;
+        if (document.getElementById('mod-menu')) {
+            console.warn('⚠️ [BobaAuto] Đang chạy nhiều bản cài đặt cùng lúc!\n' +
+                         '   Tampermonkey nhận diện script bằng @name + @namespace. Nếu 2 bản có cặp này khác nhau\n' +
+                         '   thì nó cài thêm thay vì update. Vào Tampermonkey → Dashboard → gỡ bản cũ, chỉ giữ 1 bản.');
+            return;
+        }
 
         var iconEl = document.createElement('div');
         iconEl.id = 'mod-icon';
@@ -59,7 +69,7 @@
 
         var headerEl = document.createElement('div');
         headerEl.style.cssText = 'background:#e74c3c; padding:8px 12px; font-weight:bold; font-size:13px; display:flex; justify-content:space-between; align-items:center;';
-        headerEl.innerHTML = '<span>🧋 Auto Tiệm Trà v33.0</span><button id="mod-close-btn" style="background:none; border:none; color:white; font-weight:bold; cursor:pointer; font-size:14px;">✕</button>';
+        headerEl.innerHTML = '<span>🧋 Auto Tiệm Trà v' + CFG.appVersion + '</span><button id="mod-close-btn" style="background:none; border:none; color:white; font-weight:bold; cursor:pointer; font-size:14px;">✕</button>';
         menuEl.appendChild(headerEl);
 
         var row = 'display:flex; align-items:center; gap:8px; font-size:12px;';
@@ -405,7 +415,7 @@
             prepBusy = true; btnPrep.disabled = true; btnPrep.style.opacity = '0.6';
             try {
                 console.log('\n==================================================');
-                console.log('📦 [SMART-BUDGET v33.0] BẮT ĐẦU NHẬP HÀNG');
+                console.log('📦 [SMART-BUDGET v' + CFG.appVersion + '] BẮT ĐẦU NHẬP HÀNG');
                 console.log('==================================================');
 
                 var budget = readBudget();
@@ -749,7 +759,8 @@
         // ==========================================================
         document.getElementById('btn-diag').addEventListener('click', function() {
             var L = [];
-            L.push('===== CHẨN ĐOÁN v33.0 =====');
+            L.push('===== CHẨN ĐOÁN v' + CFG.appVersion + ' =====');
+            L.push('Cảnh báo: @name/@namespace phải cố định. Nếu đổi, Tampermonkey sẽ cài bản sao mới thay vì update.');
             L.push('body.class = "' + document.body.className + '"');
             L.push('#hMoney = ' + (document.getElementById('hMoney') ? document.getElementById('hMoney').innerText : '?'));
             L.push('#fore = ' + (document.querySelector('.fore') ? document.querySelector('.fore').innerText : '?'));
@@ -803,7 +814,7 @@
             console.log(L.join('\n'));
         });
 
-        console.log('✅ [TAMPERMONKEY] Auto Tiệm Trà v33.0 đã kích hoạt!');
+        console.log('✅ [TAMPERMONKEY] Auto Tiệm Trà v' + CFG.appVersion + ' đã kích hoạt!');
     }
 
     if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(initMod, 500);
