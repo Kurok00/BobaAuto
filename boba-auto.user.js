@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926164402
+// @version      20260926170757
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '34.4',
+        appVersion: '34.5',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -30,7 +30,8 @@
         maxReduceRounds: 60,
         cupsPerCustomer: 1,
         toppingPerCustomer: 0.5,
-        restockBuffer: 5,
+        restockBuffer: 12,       // dự phòng cố định
+        restockBufferPerDay: 2,  // cộng thêm 2 phần cho MỖI ngày đã qua (nhu cầu tăng dần)
         maxAddClicksPerRow: 10,
 
         // ---------- phục vụ ----------
@@ -518,7 +519,14 @@
                     if (mC) customers = Math.min(500, Math.max(1, parseInt(mC[0], 10)));
                 }
                 var demand = customers * CFG.cupsPerCustomer;
-                console.log('👥 Khách: ~' + customers + ' → nhu cầu ' + demand + ' ly');
+                // Dự phòng = 12 + 2 × ngày. Ngày 3 → 18, ngày 10 → 32.
+                // Tổng kết ngày 3: 27 ly bán + 14 khách bỏ về = 41 người đến,
+                // nhưng buffer cũ chỉ +5 nên hết ly sớm, mất ~550k doanh thu.
+                var day = getGameDay();
+                var buffer = CFG.restockBuffer + (day > 0 ? day * CFG.restockBufferPerDay : 0);
+                console.log('👥 Khách: ~' + customers + ' → nhu cầu ' + demand + ' ly' +
+                            ' | dự phòng = ' + CFG.restockBuffer + ' + ' + (day > 0 ? day : '?') +
+                            '×' + CFG.restockBufferPerDay + ' = ' + buffer + ' (ngày ' + (day > 0 ? day : '?') + ')');
 
                 var khoTab = document.querySelector('.tab[data-tab="kho"]');
                 if (khoTab) { triggerFullClick(khoTab); await sleep(250); }
@@ -532,15 +540,15 @@
                 var teaPlan = splitNeed(demand, teaCount);
                 var teaSum = 0;
                 for (var t2 = 0; t2 < teaPlan.length; t2++) teaSum += teaPlan[t2];
-                await planTab('0', function(j) { return teaPlan[j] + CFG.restockBuffer; }, budget, budgetKnown, 'Trà');
-                console.log('   → Trà: ' + teaCount + ' món, tổng ' + teaSum + ' phần.');
+                await planTab('0', function(j) { return teaPlan[j] + buffer; }, budget, budgetKnown, 'Trà');
+                console.log('   → Trà: ' + teaCount + ' món, tổng ' + teaSum + ' phần (+' + buffer + ' dự phòng).');
 
                 var toppingNeed = Math.max(1, Math.round(demand * CFG.toppingPerCustomer));
-                await planTab('1', function(j, n) { return Math.max(1, Math.round(toppingNeed / n)) + CFG.restockBuffer; }, budget, budgetKnown, 'Topping');
+                await planTab('1', function(j, n) { return Math.max(1, Math.round(toppingNeed / n)) + buffer; }, budget, budgetKnown, 'Topping');
 
                 var cupNeed = Math.max(demand, teaSum);
-                await planTab('2', function() { return cupNeed + CFG.restockBuffer; }, budget, budgetKnown, 'Ly');
-                console.log('   → Ly: cần ' + cupNeed + '.');
+                await planTab('2', function() { return cupNeed + buffer; }, budget, budgetKnown, 'Ly');
+                console.log('   → Ly: cần ' + cupNeed + ' (+' + buffer + ' dự phòng).');
 
                 await sleep(300);
                 var st = { cost: readCost(), blocked: isCookBlocked() };
