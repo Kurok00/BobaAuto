@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926163043
+// @version      20260926163422
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '34.2',
+        appVersion: '34.3',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -349,19 +349,52 @@
             return (clone.textContent || '').trim() || '?';
         }
 
+        // "Ngày" hiển thị trên đầu game: 3 = ngày 3. -1 = không đọc được
+        function getGameDay() {
+            var el = document.getElementById('hDay');
+            if (!el) return -1;
+            var v = parseInt(String(el.textContent || '').replace(/[^\d]/g, ''), 10);
+            return isFinite(v) ? v : -1;
+        }
+        // .life = hạn sử dụng còn lại: class "l3" + chữ "3 ngày"; "l0" + "♾" = không hết hạn
+        // .warnline = SỐ LƯỢNG HẾT HẠN HÔM NAY (game vẽ kèm icon cảnh báo)
+        function getLifeInfo(row) {
+            var nm = row.querySelector('.nm');
+            var life = nm ? nm.querySelector('.life') : null;
+            var days = null, txt = '';
+            if (life) {
+                txt = String(life.textContent || '').replace(/\s+/g, ' ').trim();
+                var m = /l(\d+)/.exec(life.getAttribute('class') || '') || /(\d+)\s*ngày/i.exec(txt);
+                if (m) days = parseInt(m[1], 10);
+                else if (/♾|∞|vô hạn/i.test(txt)) days = Infinity;
+                else if (/l0\b/.test(life.getAttribute('class') || '')) days = Infinity;
+            }
+            var warn = row.querySelector('.sub .warnline');
+            var expiring = 0;
+            if (warn) {
+                var wn = String(warn.textContent || '').match(/\d+(?:[.,]\d+)?/);
+                if (wn) expiring = Math.round(parseViNumber(wn[0])) || 0;
+            }
+            return { days: days, text: txt, expiring: expiring };
+        }
+
         function getRowInfo(row) {
             var nm = row.querySelector('.nm');
             var sub = row.querySelector('.sub:not(.okline)') || row.querySelector('.sub');
             var raw = sub ? String(sub.innerText || sub.textContent || '').replace(/\s+/g, ' ').trim() : '';
             var nums = raw.match(/\d+(?:[.,]\d+)?/g) || [];
             var inp = row.querySelector('input[data-plan]');
+            var life = getLifeInfo(row);
             return {
                 row: row,
                 name: nm ? getNameText(nm) : '?',
                 stock: nums.length ? Math.round(parseViNumber(nums[0])) || 0 : null,
-                // ".sub" mới = "tồn kho · GIÁ BÁN · giá vốn" -> giá vốn là số CUỐI
+                // ".sub" = "đang có · hôm qua dùng · giá vốn" -> giá vốn là số CUỐI
                 price: nums.length > 1 ? toK(nums[nums.length - 1] + 'k') : null,
-                sell: nums.length > 1 ? toK(nums[1] + 'k') : null,
+                usedYesterday: nums.length > 1 ? Math.round(parseViNumber(nums[1])) || 0 : 0,
+                lifeDays: life.days,
+                lifeText: life.text,
+                expiring: life.expiring,
                 plan: inp ? planValue(inp) : 0,
                 raw: raw
             };
@@ -1112,6 +1145,9 @@
             L.push('body.class = "' + document.body.className + '"');
             L.push('#hMoney = ' + (document.getElementById('hMoney') ? document.getElementById('hMoney').innerText : '?'));
             L.push('#fore = ' + (document.querySelector('.fore') ? document.querySelector('.fore').innerText : '?'));
+            L.push('#hDay = ' + getGameDay() + ' | #hSub = "' +
+                   (document.getElementById('hSub') ? document.getElementById('hSub').innerText : '?') + '"' +
+                   ' | #open = ' + (document.getElementById('open') ? '"' + document.getElementById('open').innerText + '"' : 'KHÔNG CÓ'));
             var cook = getCookBtn();
             L.push('#cook = ' + (cook ? cook.outerHTML.replace(/\s+/g, ' ').slice(0, 160) : 'KHÔNG CÓ'));
             L.push('readCost=' + readCost() + ' blocked=' + isCookBlocked());
@@ -1130,13 +1166,19 @@
             L.push('--- Món trong page đang mở ---');
             getActiveRows().forEach(function(row) {
                 var inf = getRowInfo(row);
-                L.push('  ' + inf.name + ' | tồn=' + inf.stock + ' | vốn=' + inf.price + 'k | bán=' + inf.sell + 'k | KH=' + inf.plan + ' | raw="' + inf.raw + '"');
+                L.push('  ' + inf.name + ' | tồn=' + inf.stock + ' | vốn=' + inf.price + 'k | dùng hôm qua=' + inf.usedYesterday +
+                       ' | KH=' + inf.plan + ' | hạn=' + (inf.lifeDays === null ? '?' : (inf.lifeDays === Infinity ? '♾' : inf.lifeDays + ' ngày')) +
+                       (inf.expiring > 0 ? ' | ⚠ HẾT HẠN HÔM NAY: ' + inf.expiring : '') +
+                       ' | raw="' + inf.raw + '"');
             });
             L.push('--- Món ngoài page (carousel đẩy) ---');
             Array.prototype.slice.call(document.querySelectorAll('.rowi.kho')).forEach(function(row) {
                 if (act && act.contains(row)) return;
                 var inf = getRowInfo(row);
-                L.push('  ' + inf.name + ' | tồn=' + inf.stock + ' | raw="' + inf.raw + '"');
+                L.push('  ' + inf.name + ' | tồn=' + inf.stock +
+                       ' | hạn=' + (inf.lifeDays === null ? '?' : (inf.lifeDays === Infinity ? '♾' : inf.lifeDays + ' ngày')) +
+                       (inf.expiring > 0 ? ' | ⚠ HẾT HẠN HÔM NAY: ' + inf.expiring : '') +
+                       ' | raw="' + inf.raw + '"');
             });
 
             L.push('===== MÀN PHỤC VỤ =====');
