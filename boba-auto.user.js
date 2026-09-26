@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho - Tampermonkey Final
 // @namespace    http://tampermonkey.net/
-// @version      2026.09.26.1530
+// @version      2026.09.26.1514
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
