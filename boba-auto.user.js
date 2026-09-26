@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926154706
+// @version      20260926155152
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '33.4',
+        appVersion: '33.5',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -45,7 +45,7 @@
         maxToppingTaps: 3,       // tối đa bấm topping mấy lần, tránh dư
         toppingMaxMs: 3000,      // topping thêm mãi không được thì bỏ qua
         sealDelayMs: 400,        // chờ trước khi dán nắp
-        maxSealTries: 3,         // bấm dán nắp mấy lần trước khi quay lại làm topping
+        maxSealTries: 5,         // thử 5 kiểu bấm dán nắp trước khi quay lại làm topping
         traceRepeatLimit: 4,     // tránh log spam khi máy trạng thái lặp
         cupClickGapMs: 700
     };
@@ -650,6 +650,29 @@
         function topName(btn) {
             return btn ? (btn.getAttribute('aria-label') || btn.id || '?') : '?';
         }
+        // các kiểu phát event, thử lần lượt vì không biết game lắng nghe kiểu nào
+        var SEAL_STRATS = [
+            { name: 'pointer+mouse+click', run: function (el) { triggerFullClick(el); } },
+            { name: 'el.click()',           run: function (el) { try { el.click(); } catch (e) { triggerFullClick(el); } } },
+            { name: 'pointer+click',       run: function (el) { fire(el, ['pointerdown', 'pointerup', 'click'], 'up'); } },
+            { name: 'mousedown+mouseup',   run: function (el) { fire(el, ['mousedown', 'mouseup', 'click'], 'up'); } },
+            { name: 'giữ 150ms',           run: function (el) { startPress(el); setTimeout(function () { stopPress(el); }, 150); } }
+        ];
+        // game tự nói đang chờ bước nào - quan trọng nhất để biết vì sao bấm không ăn
+        function getCoachHint() {
+            var c = document.getElementById('q3coach');
+            if (!c) return null;
+            var t = String(c.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!t) return null;
+            return (c.hasAttribute('hidden') || c.style.display === 'none') ? 'ẩn: ' + t : t;
+        }
+        // kiên nhẫn của khách đang phục vụ (%)
+        function getPatience() {
+            var bar = document.querySelector('.q3bar > i');
+            if (!bar) return '?';
+            var w = parseFloat(bar.style.width || '0');
+            return isFinite(w) ? w.toFixed(0) + '%' : '?';
+        }
         function toppingSatisfied(top, st) {
             if (!top) return true;
             if (top.hasAttribute('hidden') || top.style.display === 'none') return true;
@@ -690,7 +713,7 @@
                 releasePour();
                 st = SERVE = freshServe();
                 st.order = say;
-                if (say) trace('📝 order: "' + say + '"');
+                if (say) trace('📝 order: "' + say + '"  (kiên nhẫn ' + getPatience() + ')');
             }
 
             var idle = !say || /ngồi chơi|đang chờ khách|chờ khách|hết khách/i.test(say);
@@ -813,7 +836,8 @@
             // và nhánh dán nắp không bao giờ chạy được.
             if (st.phase === 'cup' || st.phase === 'pour') {
                 if (st.lastPhaseLog !== 'pour-ok') {
-                    trace('✅ rót xong ' + pct.toFixed(1) + '% (>= ' + st.target.toFixed(1) + '%)');
+                    trace('✅ rót xong ' + pct.toFixed(1) + '% (>= ' + st.target.toFixed(1) + '%)' +
+                          ' | hình trong ly=' + cupShapeCount() + ' | kiên nhẫn=' + getPatience());
                     st.lastPhaseLog = 'pour-ok';
                 }
                 setPhase('top');
@@ -859,7 +883,9 @@
                 if (now - st.phaseAt < CFG.sealDelayMs) return;
                 if (!chkSeal.checked) { st.phase = 'idle'; return; }
                 if (st.sealTries >= CFG.maxSealTries) {
-                    traceOnce('sealFail', '⚠️ bấm dán nắp ' + CFG.maxSealTries + ' lần mà ly chưa có nắp → quay lại làm topping');
+                    traceOnce('sealFail', '⚠️ đã thử ' + CFG.maxSealTries + ' cách bấm dán nắp, ly vẫn chưa có nắp.\n' +
+                           '    game đang chờ: "' + (getCoachHint() || '?') + '"\n' +
+                           '    → quay lại làm topping');
                     st.sealTries = 0;
                     st.topTries = 0;
                     st.popsBefore = -1;
@@ -871,10 +897,14 @@
                 var seal = document.getElementById('q3seal');
                 if (!seal) { st.phase = 'idle'; return; }
                 st.phaseAt = now;
+                // thử lần lượt các kiểu phát event khác nhau, cách nào ăn thì cách đó được dùng lại
+                var si = (st.sealTries - 1) % SEAL_STRATS.length;
+                SEAL_STRATS[si].run(seal);
                 st.sealTries++;
-                triggerFullClick(seal);
-                traceOnce('sealTry', '🔒 bấm dán nắp lần ' + st.sealTries + '/' + CFG.maxSealTries +
-                          ' (ly có nắp: ' + cupSealed() + ')');
+                traceOnce('sealTry', '🔒 dán nắp lần ' + st.sealTries + '/' + CFG.maxSealTries +
+                          ' bằng [' + SEAL_STRATS[si].name + ']' +
+                          ' | nắp=' + cupSealed() + ' | kiên nhẫn=' + getPatience() +
+                          ' | game chờ: "' + (getCoachHint() || '?') + '"');
                 return;
             }
         }
@@ -933,6 +963,15 @@
             var top = getWantedTopBtn();
             L.push('topping game yêu cầu = ' + (top ? top.id + ' (' + top.className + ')' : 'KHÔNG CÓ'));
             L.push('#q3pops children = ' + (document.getElementById('q3pops') ? document.getElementById('q3pops').childElementCount : '?'));
+            L.push('hình vẽ trong ly = ' + cupShapeCount() + ' | kiên nhẫn khách = ' + getPatience());
+            L.push('game đang chờ = "' + (getCoachHint() || '?') + '"');
+            ['q3seal', 'q3trash', 'q3_M', 'q3_L'].forEach(function (id) {
+                var b = document.getElementById(id);
+                L.push('  ' + id + ': ' + (b ? 'class="' + b.className + '"' : 'KHÔNG CÓ'));
+            });
+            var sEl = document.getElementById('q3seal');
+            if (sEl) L.push('  #q3seal bị che? offsetParent=' + (sEl.offsetParent ? sEl.offsetParent.id || sEl.offsetParent.tagName : 'null') +
+                            ' | style=' + sEl.getAttribute('style'));
             var lid = document.querySelector('#q3cup img.q3lid');
             L.push('#q3cup img.q3lid hidden = ' + (lid ? lid.hasAttribute('hidden') : '?'));
             L.push('gauge .q3ok offsetLeft = ' + (document.querySelector('.q3gauge .q3ok') ? document.querySelector('.q3gauge .q3ok').offsetLeft : '?') +
