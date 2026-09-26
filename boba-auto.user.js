@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260926155152
+// @version      20260926155858
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '33.5',
+        appVersion: '33.6',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -176,13 +176,22 @@
         // ==========================================================
         // 💰 ĐỌC TIỀN — chuẩn hoá về "k" (nghìn)
         // ==========================================================
+        // game dùng kiểu Việt: "1.032k" = 1032k (CHẤM = phân cách nghìn), "2,5k" = 2.5k (PHẨY = thập phân)
+        function parseViNumber(txt) {
+            var t = String(txt).replace(/[\s\u00a0]/g, '');
+            if (!t) return NaN;
+            if (/^\d{1,3}([.,]\d{3})+$/.test(t)) return parseInt(t.replace(/[.,]/g, ''), 10);
+            t = t.replace(',', '.');
+            return parseFloat(t);
+        }
+
         function toK(str) {
             if (str === null || str === undefined) return null;
             var s = String(str).replace(/[\s\u00a0]/g, '').toLowerCase();
             if (!s) return null;
-            var m = s.match(/\d+(?:[.,]\d+)?/);
+            var m = s.match(/\d[\d.,]*/);
             if (!m) return null;
-            var val = parseFloat(m[0].replace(',', '.'));
+            var val = parseViNumber(m[0]);
             if (!isFinite(val)) return null;
             var after = s.slice(m.index + m[0].length);
             if (/^(tr|triệu)/.test(after) || /^t$/.test(after)) return val * 1000;
@@ -196,8 +205,16 @@
         function readBudget() {
             var el = document.getElementById('hMoney');
             if (!el) return null;
-            var v = toK(el.innerText || el.textContent || '');
-            return (v !== null && v > 0) ? v : null;
+            var raw = String(el.innerText || el.textContent || '').replace(/[\s\u00a0]/g, '');
+            var v = toK(raw);
+            if (v === null || v <= 0) return null;
+            // "1.032k" phải ra 1032, không phải 1.032 -> cảnh báo nếu parser sai
+            if (/\.\d{3}k/i.test(raw) && v < 100) {
+                console.warn('[BobaAuto] ⚠️ Đọc ngân sách SAI: "' + raw + '" -> ' + v + 'k. Cần ' +
+                    (parseViNumber(raw) + 'k') + '. Sẽ bỏ qua trần ngân sách cho an toàn.');
+                return null;
+            }
+            return v;
         }
 
         function getCookBtn() { return document.getElementById('cook'); }
@@ -212,13 +229,29 @@
             return !!(st && /pointer-events\s*:\s*none/i.test(st));
         }
 
+        // nút NẤU thường KHÔNG chứa số -> cộng từ các dòng ".sub.okline" (vd "+12 · 45k")
+        function readCostFromPlans() {
+            var els = document.querySelectorAll('.sub.okline');
+            var total = 0, found = false;
+            for (var i = 0; i < els.length; i++) {
+                var e = els[i];
+                if (e.hasAttribute('hidden') || e.style.display === 'none') continue;
+                var t = String(e.innerText || e.textContent || '').replace(/\s+/g, ' ').trim();
+                var m = t.match(/(\d+(?:[.,]\d+)?)\s*k/i);
+                if (m) { total += toK(m[1] + 'k') || 0; found = true; }
+            }
+            return found ? total : null;
+        }
+
         function readCost() {
             var b = getCookBtn();
-            if (!b) return null;
-            var attr = b.getAttribute && (b.getAttribute('data-cost') || b.getAttribute('data-money'));
-            if (attr) { var a = toK(attr); if (a !== null && a > 0) return a; }
-            var v = toK(b.innerText || b.textContent || '');
-            return (v !== null && v >= 0) ? v : null;
+            if (b) {
+                var attr = b.getAttribute && (b.getAttribute('data-cost') || b.getAttribute('data-money'));
+                if (attr) { var a = toK(attr); if (a !== null && a > 0) return a; }
+                var v = toK(b.innerText || b.textContent || '');
+                if (v !== null && v > 0) return v;
+            }
+            return readCostFromPlans();
         }
 
         function isSafeToCook(budgetK, budgetKnown) {
@@ -318,8 +351,10 @@
             return {
                 row: row,
                 name: nm ? getNameText(nm) : '?',
-                stock: nums.length ? Math.round(parseFloat(nums[0].replace(',', '.'))) || 0 : null,
-                price: nums.length > 1 ? toK(nums[1] + 'k') : null,
+                stock: nums.length ? Math.round(parseViNumber(nums[0])) || 0 : null,
+                // ".sub" mới = "tồn kho · GIÁ BÁN · giá vốn" -> giá vốn là số CUỐI
+                price: nums.length > 1 ? toK(nums[nums.length - 1] + 'k') : null,
+                sell: nums.length > 1 ? toK(nums[1] + 'k') : null,
                 plan: inp ? planValue(inp) : 0,
                 raw: raw
             };
@@ -433,7 +468,8 @@
                 var budget = readBudget();
                 var budgetKnown = budget !== null && budget > 0;
                 if (!budgetKnown) { budget = CFG.fallbackBudget; console.warn('💰 Không đọc được #hMoney — dùng ' + budget + 'k.'); }
-                else console.log('💰 Ví: ' + budget + 'k');
+                else console.log('💰 Ví: ' + budget + 'k   (raw="' +
+                    (document.getElementById('hMoney') ? String(document.getElementById('hMoney').innerText || '').replace(/\s+/g, ' ').trim() : '?') + '")');
 
                 var foreEl = document.querySelector('.fore.big2') || document.querySelector('.fore');
                 var customers = 20;
@@ -939,7 +975,7 @@
             L.push('--- Món trong page đang mở ---');
             getActiveRows().forEach(function(row) {
                 var inf = getRowInfo(row);
-                L.push('  ' + inf.name + ' | tồn=' + inf.stock + ' | giá=' + inf.price + 'k | KH=' + inf.plan + ' | raw="' + inf.raw + '"');
+                L.push('  ' + inf.name + ' | tồn=' + inf.stock + ' | vốn=' + inf.price + 'k | bán=' + inf.sell + 'k | KH=' + inf.plan + ' | raw="' + inf.raw + '"');
             });
             L.push('--- Món ngoài page (carousel đẩy) ---');
             Array.prototype.slice.call(document.querySelectorAll('.rowi.kho')).forEach(function(row) {
