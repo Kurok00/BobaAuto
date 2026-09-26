@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho - Tampermonkey Final
 // @namespace    http://tampermonkey.net/
-// @version      32.0
+// @version      2026.09.26.1500
 // @description  Tự quy hoạch kho theo nhu cầu khách, cắt giảm khi vượt ví, chặn lỗi 999999k
 // @author       Kurok00
 // @license      MIT
