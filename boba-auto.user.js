@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260928010000  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
+// @version      20260928020000  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '35.2',
+        appVersion: '35.3',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -54,14 +54,14 @@
         sugarRetryMs: 900,       // chờ #q3hint cập nhật (animation game ~420ms) rồi mới bấm lại
         sugarBudgetMs: 10000,     // tổng ngân sách bước đường & đá, kể cả khi quay lại từ dán nắp
         setPriceTargetK: 25,       // giá mặc định mỗi nguyên liệu (nghìn đồng) khi bấm "Đặt giá"
-        optimizeEnabled: false,    // bật tối ưu giá tự động mỗi ngày
+        optimizeEnabled: true,     // bật tối ưu giá tự động mỗi ngày
         optimizeDayLast: 0,        // ngày cuối đã ghi nhận (0 = chưa bao giờ)
-        optimizeMoneyAtDayStart: 0, // #hMoney tại đầu ngày (để tính lợi nhuận)
-        optimizeProfitPrev: undefined, // lợi nhuận ngày trước (để so sánh)
+        optimizeStorageKey: 'boba-auto-price-optimize',
         priceStep: 1000,           // bước điều chỉnh mỗi lần (VND/nguyên liệu)
         priceMin: 5000,            // giá tối thiểu mỗi nguyên liệu
+        priceCap: 120000,          // trần giá tham chiếu của game (VND)
         priceCapSafety: 0.8,       // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260928010000', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260928020000', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
@@ -171,10 +171,12 @@
         var logSetPrice = document.getElementById('log-setprice');
         chkSetPrice.addEventListener('change', function() { rowSetPrice.style.display = chkSetPrice.checked ? 'flex' : 'none'; });
         var chkOptimize = document.getElementById('chk-optimize');
+        loadOptimizeState();
+        chkOptimize.checked = CFG.optimizeEnabled;
         chkOptimize.addEventListener('change', function() {
             CFG.optimizeEnabled = chkOptimize.checked;
             CFG.optimizeDayLast = 0;
-            CFG.optimizeProfitPrev = undefined;
+            saveOptimizeState();
             trace(chkOptimize.checked ? '⚡ Tối ưu giá BẬT — mỗi ngày sẽ tự điều chỉnh' : '⚡ Tối ưu giá TẮT');
         });
         document.getElementById('mod-check-ver').addEventListener('click', checkUpdate);
@@ -320,6 +322,25 @@
             script.remove();
         }
 
+        function loadOptimizeState() {
+            try {
+                var raw = localStorage.getItem(CFG.optimizeStorageKey);
+                if (!raw) return;
+                var state = JSON.parse(raw);
+                if (typeof state.enabled === 'boolean') CFG.optimizeEnabled = state.enabled;
+                if (isFinite(state.day)) CFG.optimizeDayLast = +state.day;
+            } catch (e) {}
+        }
+
+        function saveOptimizeState() {
+            try {
+                localStorage.setItem(CFG.optimizeStorageKey, JSON.stringify({
+                    enabled: CFG.optimizeEnabled,
+                    day: CFG.optimizeDayLast
+                }));
+            } catch (e) {}
+        }
+
         document.getElementById('btn-setprice').addEventListener('click', function() {
             var k = Math.max(1, Math.min(100, parseInt(inpPriceK.value) || CFG.setPriceTargetK));
             applySetPrice(k);
@@ -353,38 +374,91 @@
             script.remove();
         }
 
-        // tối ưu giá mỗi ngày dựa trên lợi nhuận (#hMoney delta)
-        function checkPriceOptimize() {
+        function normalizePriceName(name) {
+            return norm(String(name || '').replace(/\s*\(M\)\s*$/i, ''));
+        }
+
+        async function collectYesterdayDemand() {
+            var khoTab = document.querySelector('.tab[data-tab="kho"]');
+            if (khoTab) { triggerFullClick(khoTab); await sleep(250); }
+            var stats = [];
+            var tabs = getWarehouseTabs();
+            for (var i = 0; i < tabs.length; i++) {
+                if (!(await selectTab(tabs[i]))) continue;
+                var rows = getActiveRows();
+                for (var j = 0; j < rows.length; j++) {
+                    var info = getRowInfo(rows[j]);
+                    if (info.name !== '?' && info.usedYesterday > 0) {
+                        stats.push({ name: normalizePriceName(info.name), used: info.usedYesterday });
+                    }
+                }
+            }
+            return stats;
+        }
+
+        function applyDemandPrices(stats) {
+            var inputs = document.querySelectorAll('input[data-g="sell"][data-k]');
+            var changes = [];
+            for (var i = 0; i < inputs.length; i++) {
+                var input = inputs[i];
+                var label = normalizePriceName(input.getAttribute('aria-label') || input.dataset.k);
+                var used = 0;
+                for (var j = 0; j < stats.length; j++) {
+                    if (label.indexOf(stats[j].name) !== -1 || stats[j].name.indexOf(label) !== -1) {
+                        used = Math.max(used, stats[j].used);
+                    }
+                }
+                var delta = used >= 10 ? CFG.priceStep : (used <= 2 ? -CFG.priceStep : 0);
+                if (delta) changes.push({ key: input.dataset.k, delta: delta, used: used });
+            }
+            if (!changes.length) return 0;
+            var code = [
+                '(function(){',
+                '  var changes=' + JSON.stringify(changes) + ';',
+                '  var min=' + CFG.priceMin + ';',
+                '  var safeCap=' + Math.round(CFG.priceCap * CFG.priceCapSafety) + ';',
+                '  var n=0;',
+                '  changes.forEach(function(c){',
+                '    if (!S.sell || S.sell[c.key] === undefined) return;',
+                '    var cap=c.key==="L"?(S.sizeCap||50000):(S.itemCap*2||100000);',
+                '    S.sell[c.key]=Math.min(Math.max(S.sell[c.key]+c.delta,min),Math.min(cap,safeCap));',
+                '    n++;',
+                '  });',
+                '  save();',
+                '  document.querySelectorAll("input[data-g=\\"sell\\"]").forEach(function(i){var v=S.sell[i.dataset.k];if(v!==undefined)i.value=v/1000});',
+                '  if(typeof paneGia==="function")paneGia();',
+                '  window.__bobaOptimizeChanged=n;',
+                '})();'
+            ].join('\n');
+            var script = document.createElement('script');
+            script.textContent = code;
+            document.body.appendChild(script);
+            script.remove();
+            return changes.length;
+        }
+
+        var optimizeBusy = false;
+        // tối ưu giá mỗi ngày theo số lượng từng món đã dùng hôm qua
+        async function checkPriceOptimize() {
             if (!CFG.optimizeEnabled) return;
             var curDay = getGameDay();
-            if (curDay === CFG.optimizeDayLast) return;
-            var moneyNow = readBudget();
-            if (moneyNow === null) { CFG.optimizeDayLast = curDay; return; }
-            if (CFG.optimizeDayLast > 0) {
-                var profitToday = moneyNow - CFG.optimizeMoneyAtDayStart;
-                if (CFG.optimizeProfitPrev !== undefined && CFG.optimizeProfitPrev > 0) {
-                    var pct = (profitToday - CFG.optimizeProfitPrev) / CFG.optimizeProfitPrev;
-                    if (pct > 0.15) {
-                        CFG.priceStep = Math.min(CFG.priceStep * 1.2, CFG.priceCap * 0.03);
-                        adjustPricesBy(CFG.priceStep);
-                        trace('⚡ giá ↑ +' + CFG.priceStep + 'đ (lợi nhuận +' + (pct*100).toFixed(0) + '%: ' + profitToday + 'k)');
-                    } else if (pct < -0.15) {
-                        CFG.priceStep = Math.max(CFG.priceStep * 0.8, 500);
-                        adjustPricesBy(-CFG.priceStep);
-                        trace('⚡ giá ↓ −' + CFG.priceStep + 'đ (lợi nhuận ' + (pct*100).toFixed(0) + '%: ' + profitToday + 'k)');
-                    } else {
-                        trace('⚡ giá giữ (lợi nhuận ' + (pct*100).toFixed(0) + '%: ' + profitToday + 'k)');
-                    }
-                    var lg = document.getElementById('log-optimize');
-                    if (lg) lg.textContent = '⚡ ' + (pct > 0.15 ? '↑' : pct < -0.15 ? '↓' : '→') + ' LN ' + profitToday + 'k | bước ' + Math.round(CFG.priceStep) + 'đ';
-                } else {
-                    adjustPricesBy(CFG.priceStep);
-                    trace('⚡ THỬ giá +' + CFG.priceStep + 'đ (điều chỉnh lần 1)');
-                }
-                CFG.optimizeProfitPrev = profitToday;
+            if (curDay < 1 || curDay === CFG.optimizeDayLast || optimizeBusy) return;
+            optimizeBusy = true;
+            try {
+                var stats = await collectYesterdayDemand();
+                var giaTab = document.querySelector('.tab[data-tab="gia"]');
+                if (giaTab) { triggerFullClick(giaTab); await sleep(250); }
+                var changed = applyDemandPrices(stats);
+                CFG.optimizeDayLast = curDay;
+                saveOptimizeState();
+                var lg = document.getElementById('log-optimize');
+                if (lg) lg.textContent = '⚡ Ngày ' + curDay + ': đã chỉnh ' + changed + ' mục theo nhu cầu hôm qua';
+                trace('⚡ tối ưu giá ngày ' + curDay + ': ' + changed + ' mục, dữ liệu ' + stats.length + ' món');
+            } catch (err) {
+                console.warn('[BobaAuto] Không tối ưu được giá ngày ' + curDay + ':', err);
+            } finally {
+                optimizeBusy = false;
             }
-            CFG.optimizeMoneyAtDayStart = moneyNow;
-            CFG.optimizeDayLast = curDay;
         }
 
         // ---------------- sự kiện giả ----------------
