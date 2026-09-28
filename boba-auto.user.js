@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260928171424  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
-// @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
+// @version      20260928171705  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
+// @description  Tự nhập hàng theo nhu cầu tối đa 2 ly/khách, tự phục vụ đúng trà - topping - đường - đá, tối ưu giá menu, giao diện responsive và chẩn đoán DOM.
 // @author       Kurok00
 // @license      MIT
 // @match        https://trongnhi.trongnhi110266.workers.dev/*
@@ -58,7 +58,7 @@
         priceMin: 5000, // giá tối thiểu mỗi nguyên liệu
         priceCap: 120000, // trần giá tham chiếu của game (VND)
         priceCapSafety: 0.8, // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260928171424', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260928171705', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
