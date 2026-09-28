@@ -1,5 +1,12 @@
 # Lịch sử thay đổi
 
+## [40.0] - 2026-09-28
+
+- Tách tài liệu thành README cho user và README_DEV cho developer.
+- Giữ flow nhập ly trước để bảo vệ điều kiện tối thiểu khi bán hàng.
+- Cải tiến auto set giá theo tín hiệu `rẻ / đắt`, nhu cầu và phần trăm giá vốn.
+- Bổ sung hướng dẫn kiểm tra, scanner DOM và quy trình release.
+
 ## [35.9] - 2026-09-28
 
 - Ưu tiên nhập đủ ly trước khi phân bổ ngân sách cho trà và topping.

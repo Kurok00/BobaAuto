@@ -1,6 +1,6 @@
 # 🧋 Auto Tiệm Trà (BobaAuto)
 
-Userscript tự động hoá quán trà trên trình duyệt: **tự quy hoạch kho theo nhu cầu khách** và **tự phục vụ** — lấy ly đúng size, bỏ topping, rót đúng trà, dán nắp giao ly.
+Userscript tự động hoá quán trà trên trình duyệt: **ưu tiên nhập đủ ly**, quy hoạch trà/topping theo nhu cầu, tự phục vụ và tự điều chỉnh giá menu theo giá vốn.
 
 Chạy trên **Edge điện thoại**, **Edge máy tính** và các trình duyệt khác, thông qua extension **Tampermonkey**.
 
@@ -16,7 +16,7 @@ Chạy trên **Edge điện thoại**, **Edge máy tính** và các trình duy�
 5. Dán link này vào và bấm **Install**:
 
    ```
-   https://raw.githubusercontent.com/Kurok00/BobaAuto/main/boba-auto.user.js
+   https://raw.githubusercontent.com/Kurok00/BobaAuto/658eadb/boba-auto.user.js
    ```
 
 6. Trình duyệt hỏi *"Cài đặt Auto Tiệm Trà?"* → bấm **Install / Cài đặt**.
@@ -36,7 +36,7 @@ Chạy trên **Edge điện thoại**, **Edge máy tính** và các trình duy�
 5. **Get new scripts** → dán link → **Install**:
 
    ```
-   https://raw.githubusercontent.com/Kurok00/BobaAuto/main/boba-auto.user.js
+   https://raw.githubusercontent.com/Kurok00/BobaAuto/658eadb/boba-auto.user.js
    ```
 
 6. Bấm **Cài đặt / Install**. Xong.
@@ -53,7 +53,7 @@ Chạy trên **Edge điện thoại**, **Edge máy tính** và các trình duy�
 
 1. Mở game → nhấn nút **⏸ Tạm dừng** để quy hoạch trước (khuyến nghị ở ngày đầu).
 2. Bấm icon **🧋** trên góc phải màn hình để mở bảng điều khiển (kéo thả được).
-3. Trước mỗi ngày bấm **⚡ Auto Nhập Hàng Thông Minh** — script tự tính số lượng theo số khách và số tiền trong ví, rồi tự bấm **NẤU**.
+3. Trước mỗi ngày bấm **⚡ Auto Nhập Hàng Thông Minh** — script ưu tiên mua ly trước theo tối đa 2 ly/khách và dự phòng theo ngày, sau đó mới phân bổ tiền cho trà/topping rồi tự bấm **NẤU**.
 4. Mở cửa quán (nút **Mở cửa ngày N**) và chơi — phần phục vụ tự chạy theo các công tắc:
 
    | # | Công tắc | Mặc định |
@@ -66,6 +66,17 @@ Chạy trên **Edge điện thoại**, **Edge máy tính** và các trình duy�
 
 5. Muốn xem thông tin kỹ thuật → bấm **🔍 Chẩn Đoán DOM** (in ra Console).
 
+### Tối ưu giá menu
+
+Bấm **⚡ Tự động đặt giá hôm nay** trong menu BobaAuto. Script kết hợp số bán hôm qua, giá vốn và tín hiệu của game:
+
+- Món được đánh dấu **rẻ**: tăng theo 12,5% hoặc 25% giá vốn tùy sức bán.
+- Món được đánh dấu **đắt**: giảm 25% giá vốn.
+- Món không có dữ liệu bán hôm qua: giữ nguyên, không tự hạ giá.
+- Mức thay đổi được làm tròn theo bước 0,5k và vẫn nằm trong giới hạn an toàn của game.
+
+Mở tab **Tổng kết** để xem doanh thu/số bán, hoặc tab **Giá bán** để xem giá vốn và trạng thái rẻ/đắt trước khi tối ưu.
+
 ### Tắt báo động
 Khi mọi thứ chạy ổn, **tắt Trace log** để Console gọn và nhẹ máy hơn (đặc biệt trên điện thoại).
 
@@ -73,11 +84,11 @@ Khi mọi thứ chạy ổn, **tắt Trace log** để Console gọn và nhẹ m
 
 ## 🔄 Cập nhật
 
-Script tự lấy bản mới. Nhưng nếu bạn vừa chỉ sửa xong:
+Sau mỗi release, dùng URL release được ghi trong README này để tránh cache CDN:
 
 1. Vào **Dashboard** của Tampermonkey.
-2. Bấm **Check for user script updates** (hoặc **Fetch** trên bản dùng chung).
-3. Hoặc tải lại trang game (F5 / tải lại).
+2. Chọn **Install from URL / Import from URL**.
+3. Dán URL release mới rồi cài đè bản cũ; sau đó tải lại game.
 
 > Không tự cài file `.js` mới đè lên bản cũ nếu bạn không muốn mất thiết lập.
 
