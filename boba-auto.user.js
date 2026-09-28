@@ -1134,10 +1134,17 @@
                 var iceBtn = document.getElementById('q3b_ice');
                 if (!sugarBtn || !iceBtn) { setPhase('seal'); return; }
 
-                if (st.sugarClicks === 0 && st.iceClicks === 0) {
+                if (st.sugarTarget === 0 && st.iceTarget === 0 && st.sugarClicks === 0 && st.iceClicks === 0) {
                     st.sugarTarget = getSugarPresses(say);
                     st.iceTarget = getIceScoops(say);
+                    st.lastPress = 0;
                     trace('🧊 đường & đá: bấm nước đường ' + st.sugarTarget + ' lần, xúc đá ' + st.iceTarget + ' lần');
+                }
+
+                if (now - st.phaseAt > 5000) {
+                    traceOnce('sugarTimeout', '⚠️ đường & đá quá 5s → dán nắp luôn');
+                    setPhase('seal');
+                    return;
                 }
 
                 var sugarDelay = 350;
