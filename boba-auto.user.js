@@ -11,8 +11,8 @@
 // @run-at       document-idle
 // @homepageURL  https://github.com/Kurok00/BobaAuto
 // @supportURL   https://github.com/Kurok00/BobaAuto/issues
-// @updateURL    https://raw.githubusercontent.com/Kurok00/BobaAuto/bf888ad/boba-auto.user.js
-// @downloadURL  https://raw.githubusercontent.com/Kurok00/BobaAuto/bf888ad/boba-auto.user.js
+// @updateURL    https://raw.githubusercontent.com/Kurok00/BobaAuto/0f119f6/boba-auto.user.js
+// @downloadURL  https://raw.githubusercontent.com/Kurok00/BobaAuto/0f119f6/boba-auto.user.js
 // ==/UserScript==
 
 (function() {
@@ -256,7 +256,7 @@
             if (!statusEl) return;
             statusEl.textContent = '⏳ Đang kiểm tra...';
             var script = document.createElement('script');
-            script.textContent = '(function(){fetch("https://raw.githubusercontent.com/Kurok00/BobaAuto/bf888ad/boba-auto.user.js").then(function(r){return r.text()}).then(function(t){var m=t.match(/@version\s+(\d+)/);var e=document.getElementById("__boba_remote_version");if(e)e.textContent=m?m[1]:"";}).catch(function(){var e=document.getElementById("__boba_remote_version");if(e)e.textContent="ERR";})})();';
+            script.textContent = '(function(){fetch("https://raw.githubusercontent.com/Kurok00/BobaAuto/0f119f6/boba-auto.user.js").then(function(r){return r.text()}).then(function(t){var m=t.match(/@version\s+(\d+)/);var e=document.getElementById("__boba_remote_version");if(e)e.textContent=m?m[1]:"";}).catch(function(){var e=document.getElementById("__boba_remote_version");if(e)e.textContent="ERR";})})();';
             document.body.appendChild(script);
             script.remove();
             var poll = setInterval(function() {
@@ -273,7 +273,7 @@
         function openScriptUpdate() {
             var statusEl = document.getElementById('mod-update-status');
             if (statusEl) statusEl.textContent = '⬆️ Đang mở trình cập nhật Tampermonkey...';
-            window.open('https://raw.githubusercontent.com/Kurok00/BobaAuto/bf888ad/boba-auto.user.js', '_blank', 'noopener');
+            window.open('https://raw.githubusercontent.com/Kurok00/BobaAuto/0f119f6/boba-auto.user.js', '_blank', 'noopener');
         }
 
         function setScanStatus(msg, ok) {

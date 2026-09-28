@@ -16,7 +16,7 @@ Chạy trên **Edge điện thoại**, **Edge máy tính** và các trình duy�
 5. Dán link này vào và bấm **Install**:
 
    ```
-   https://raw.githubusercontent.com/Kurok00/BobaAuto/658eadb/boba-auto.user.js
+   https://raw.githubusercontent.com/Kurok00/BobaAuto/0f119f6/boba-auto.user.js
    ```
 
 6. Trình duyệt hỏi *"Cài đặt Auto Tiệm Trà?"* → bấm **Install / Cài đặt**.
@@ -36,7 +36,7 @@ Chạy trên **Edge điện thoại**, **Edge máy tính** và các trình duy�
 5. **Get new scripts** → dán link → **Install**:
 
    ```
-   https://raw.githubusercontent.com/Kurok00/BobaAuto/658eadb/boba-auto.user.js
+   https://raw.githubusercontent.com/Kurok00/BobaAuto/0f119f6/boba-auto.user.js
    ```
 
 6. Bấm **Cài đặt / Install**. Xong.
