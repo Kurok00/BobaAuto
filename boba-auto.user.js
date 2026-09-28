@@ -52,7 +52,8 @@
         traceRepeatLimit: 4,     // tránh log spam khi máy trạng thái lặp
         cupClickGapMs: 700,
         sugarRetryMs: 900,       // chờ #q3hint cập nhật (animation game ~420ms) rồi mới bấm lại
-        sugarBudgetMs: 10000     // tổng ngân sách bước đường & đá, kể cả khi quay lại từ dán nắp
+        sugarBudgetMs: 10000,     // tổng ngân sách bước đường & đá, kể cả khi quay lại từ dán nắp
+        setPriceTargetK: 25       // giá mặc định mỗi nguyên liệu (nghìn đồng) khi bấm "Đặt giá"
     };
 
     function initMod() {
@@ -94,7 +95,11 @@
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autoseal" checked><b>5. Dán nắp &amp; giao ly</b></label></div>' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autodecl" checked><b>6. Từ chối đơn hết món (bấm "mời về")</b></label></div>' +
             '<hr style="border:0; border-top:1px solid #34495e; margin:4px 0;">' +
-            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-trace"><b>Trace log (tắt khi ổn)</b></label></div>';
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-trace"><b>Trace log (tắt khi ổn)</b></label></div>' +
+            '<hr style="border:0; border-top:1px solid #e67e22; margin:4px 0;">' +
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-setprice"><b>⚡ Đặt giá bán (thử nghiệm)</b></label></div>' +
+            '<div id="row-setprice" style="display:none; ' + row + '"><input type="number" id="inp-price-k" value="25" min="1" max="100" step="1" style="width:60px; padding:2px; text-align:center;"><span>k/mục</span> <button id="btn-setprice" style="background:#e67e22; color:white; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:11px;">Áp dụng</button></div>' +
+            '<div id="log-setprice" style="font-size:11px; color:#2ecc71; margin-top:2px;"></div>';
         menuEl.appendChild(bodyEl);
         document.body.appendChild(menuEl);
 
@@ -144,6 +149,45 @@
             }
         });
         document.getElementById('mod-close-btn').addEventListener('click', function() { menuEl.style.display = 'none'; });
+
+        // ---------------- đặt giá bán (thử nghiệm) ----------------
+        var chkSetPrice = document.getElementById('chk-setprice');
+        var inpPriceK = document.getElementById('inp-price-k');
+        var rowSetPrice = document.getElementById('row-setprice');
+        var logSetPrice = document.getElementById('log-setprice');
+        chkSetPrice.addEventListener('change', function() { rowSetPrice.style.display = chkSetPrice.checked ? 'flex' : 'none'; });
+
+        function applySetPrice(targetK) {
+            var targetVND = Math.round(Math.max(1, +targetK || CFG.setPriceTargetK) * 1000);
+            var code = [
+                '(function() {',
+                '  var t=' + targetVND + ';',
+                '  var c=Object.keys(S.sell||{});',
+                '  var n=0;',
+                '  c.forEach(function(k){',
+                '    var cap=k==="L"?(CFG.sizeCap||50000):(CFG.itemCap*2||100000);',
+                '    var v=Math.min(t,cap);',
+                '    if(v>0){S.sell[k]=v;n++}',
+                '  });',
+                '  save();',
+                '  var inps=document.querySelectorAll("input[data-g=sell]");',
+                '  inps.forEach(function(i){var k=i.dataset.k,v=S.sell[k];if(v!==undefined)i.value=v/1000});',
+                '  if(typeof paneGia==="function")paneGia();',
+                '  console.log("[BobaAuto] ✅ Đặt giá: "+n+"/"+c.length+" nguyên liệu = "+t+"k/mục");',
+                '  var lg=document.getElementById("log-setprice");',
+                '  if(lg)lg.textContent="✅ Đặt '+targetK+'k cho "+n+" nguyên liệu";',
+                '})();'
+            ].join('\n');
+            var script = document.createElement('script');
+            script.textContent = code;
+            document.body.appendChild(script);
+            script.remove();
+        }
+
+        document.getElementById('btn-setprice').addEventListener('click', function() {
+            var k = Math.max(1, Math.min(100, parseInt(inpPriceK.value) || CFG.setPriceTargetK));
+            applySetPrice(k);
+        });
 
         // ---------------- sự kiện giả ----------------
         // pointerdown/pointerup phải là PointerEvent thật, nếu dùng MouseEvent
