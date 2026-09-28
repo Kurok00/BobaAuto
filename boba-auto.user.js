@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260928040000  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
+// @version      20260928164643  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -54,14 +54,11 @@
         sugarRetryMs: 900, // chờ #q3hint cập nhật (animation game ~420ms) rồi mới bấm lại
         sugarBudgetMs: 10000, // tổng ngân sách bước đường & đá, kể cả khi quay lại từ dán nắp
         setPriceTargetK: 25, // giá mặc định mỗi nguyên liệu (nghìn đồng) khi bấm "Đặt giá"
-        optimizeEnabled: true, // bật tối ưu giá tự động mỗi ngày
-        optimizeDayLast: 0, // ngày cuối đã ghi nhận (0 = chưa bao giờ)
-        optimizeStorageKey: 'boba-auto-price-optimize',
         priceStep: 1000, // bước điều chỉnh mỗi lần (VND/nguyên liệu)
         priceMin: 5000, // giá tối thiểu mỗi nguyên liệu
         priceCap: 120000, // trần giá tham chiếu của game (VND)
         priceCapSafety: 0.8, // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260928040000', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260928164643', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
@@ -106,16 +103,16 @@
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autodecl" checked><b>6. Từ chối đơn hết món (bấm "mời về")</b></label></div>' +
             '<hr style="border:0; border-top:1px solid #34495e; margin:4px 0;">' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-trace"><b>Trace log (tắt khi ổn)</b></label></div>' +
-            '<hr style="border:0; border-top:1px solid #e67e22; margin:4px 0;">' +
-            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-setprice"><b>⚡ Đặt giá bán (thử nghiệm)</b></label></div>' +
-            '<div id="row-setprice" style="display:none; ' + row + '"><input type="number" id="inp-price-k" value="25" min="1" max="100" step="1" style="width:60px; padding:2px; text-align:center;"><span>k/mục</span> <button id="btn-setprice" style="background:#e67e22; color:white; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:11px;">Áp dụng</button></div>' +
-            '<div id="log-setprice" style="font-size:11px; color:#2ecc71; margin-top:2px;"></div>' +
             '<hr style="border:0; border-top:1px solid #27ae60; margin:4px 0;">' +
-            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-optimize"><b>⚡ Tối ưu giá mỗi ngày</b></label></div>' +
+            '<button id="btn-optimize-price" style="background:#27ae60; color:white; border:none; padding:8px; border-radius:6px; font-weight:bold; font-size:12px; cursor:pointer; text-align:center;">⚡ Tự động đặt giá hôm nay</button>' +
             '<div id="log-optimize" style="font-size:11px; color:#2ecc71; margin-top:2px;"></div>' +
             '<div id="mod-update-status" style="font-size:11px; color:#2ecc71; margin-top:4px; text-align:center; padding:4px 0; border-top:1px solid #27ae60;">✅ Đã biết bản @' + CFG.tampermonkeyVersion + '</div>';
         menuEl.appendChild(bodyEl);
         document.body.appendChild(menuEl);
+        var priceSummaryEl = document.createElement('div');
+        priceSummaryEl.id = 'price-summary';
+        priceSummaryEl.style.cssText = 'position:fixed; display:none; width:220px; box-sizing:border-box; padding:9px 11px; background:rgba(39, 174, 96, 0.96); color:#ffffff; border:1px solid #2ecc71; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.35); font-size:11px; line-height:1.4; z-index:999999;';
+        document.body.appendChild(priceSummaryEl);
 
         // ---------------- kéo thả icon ----------------
         var isDragging = false,
@@ -152,6 +149,26 @@
             menuEl.style.left = Math.max(10, Math.min(window.innerWidth - 260, iLeft - 185)) + 'px';
             menuEl.style.top = (iTop + 52 > window.innerHeight - 210 ? iTop - 160 : iTop + 52) + 'px';
             menuEl.style.right = 'auto';
+            positionPriceSummary();
+        }
+
+        function positionPriceSummary() {
+            if (!priceSummaryEl || priceSummaryEl.style.display === 'none') return;
+            var rect = menuEl.getBoundingClientRect();
+            priceSummaryEl.style.left = Math.max(8, Math.min(window.innerWidth - 228, rect.right + 8)) + 'px';
+            priceSummaryEl.style.top = Math.max(8, Math.min(window.innerHeight - 90, rect.top)) + 'px';
+        }
+
+        var priceSummaryTimer;
+
+        function showPriceSummary(message) {
+            priceSummaryEl.textContent = message;
+            priceSummaryEl.style.display = 'block';
+            positionPriceSummary();
+            clearTimeout(priceSummaryTimer);
+            priceSummaryTimer = setTimeout(function() {
+                priceSummaryEl.style.display = 'none';
+            }, 5000);
         }
         iconEl.addEventListener('mousedown', onPointerDown);
         document.addEventListener('mousemove', onPointerMove);
@@ -169,23 +186,13 @@
                 }
             }
         });
-        document.getElementById('mod-close-btn').addEventListener('click', function() { menuEl.style.display = 'none'; });
-
-        // ---------------- đặt giá bán (thử nghiệm) ----------------
-        var chkSetPrice = document.getElementById('chk-setprice');
-        var inpPriceK = document.getElementById('inp-price-k');
-        var rowSetPrice = document.getElementById('row-setprice');
-        var logSetPrice = document.getElementById('log-setprice');
-        chkSetPrice.addEventListener('change', function() { rowSetPrice.style.display = chkSetPrice.checked ? 'flex' : 'none'; });
-        var chkOptimize = document.getElementById('chk-optimize');
-        loadOptimizeState();
-        chkOptimize.checked = CFG.optimizeEnabled;
-        chkOptimize.addEventListener('change', function() {
-            CFG.optimizeEnabled = chkOptimize.checked;
-            CFG.optimizeDayLast = 0;
-            saveOptimizeState();
-            trace(chkOptimize.checked ? '⚡ Tối ưu giá BẬT — mỗi ngày sẽ tự điều chỉnh' : '⚡ Tối ưu giá TẮT');
+        document.getElementById('mod-close-btn').addEventListener('click', function() {
+            menuEl.style.display = 'none';
+            priceSummaryEl.style.display = 'none';
         });
+
+        // ---------------- tự động đặt giá menu ----------------
+        document.getElementById('btn-optimize-price').addEventListener('click', checkPriceOptimize);
         document.getElementById('mod-check-ver').addEventListener('click', checkUpdate);
         document.getElementById('mod-update-script').addEventListener('click', openScriptUpdate);
 
@@ -308,85 +315,6 @@
             return Promise.resolve(ok);
         }
 
-        function applySetPrice(targetK) {
-            var targetVND = Math.round(Math.max(1, +targetK || CFG.setPriceTargetK) * 1000);
-            var code = [
-                '(function() {',
-                '  var t=' + targetVND + ';',
-                '  var c=Object.keys(S.sell||{});',
-                '  var n=0;',
-                '  c.forEach(function(k){',
-                '    var cap=k==="L"?(CFG.sizeCap||50000):(CFG.itemCap*2||100000);',
-                '    var v=Math.min(t,cap);',
-                '    if(v>0){S.sell[k]=v;n++}',
-                '  });',
-                '  save();',
-                '  var inps=document.querySelectorAll("input[data-g=sell]");',
-                '  inps.forEach(function(i){var k=i.dataset.k,v=S.sell[k];if(v!==undefined)i.value=v/1000});',
-                '  if(typeof paneGia==="function")paneGia();',
-                '  console.log("[BobaAuto] ✅ Đặt giá: "+n+"/"+c.length+" nguyên liệu = "+t+"k/mục");',
-                '  var lg=document.getElementById("log-setprice");',
-                '  if(lg)lg.textContent="✅ Đặt ' + targetK + 'k cho "+n+" nguyên liệu";',
-                '})();'
-            ].join('\n');
-            var script = document.createElement('script');
-            script.textContent = code;
-            document.body.appendChild(script);
-            script.remove();
-        }
-
-        function loadOptimizeState() {
-            try {
-                var raw = localStorage.getItem(CFG.optimizeStorageKey);
-                if (!raw) return;
-                var state = JSON.parse(raw);
-                if (typeof state.enabled === 'boolean') CFG.optimizeEnabled = state.enabled;
-                if (isFinite(state.day)) CFG.optimizeDayLast = +state.day;
-            } catch (e) {}
-        }
-
-        function saveOptimizeState() {
-            try {
-                localStorage.setItem(CFG.optimizeStorageKey, JSON.stringify({
-                    enabled: CFG.optimizeEnabled,
-                    day: CFG.optimizeDayLast
-                }));
-            } catch (e) {}
-        }
-
-        document.getElementById('btn-setprice').addEventListener('click', function() {
-            var k = Math.max(1, Math.min(100, parseInt(inpPriceK.value) || CFG.setPriceTargetK));
-            applySetPrice(k);
-        });
-
-        // điều chỉnh giá tất cả nguyên liệu ±step (uniform)
-        function adjustPricesBy(step) {
-            var maxAllowed = Math.round(CFG.priceCap * CFG.priceCapSafety);
-            var code = [
-                '(function() {',
-                '  var step=' + step + ';',
-                '  var maxAllowed=' + maxAllowed + ';',
-                '  var priceMin=' + CFG.priceMin + ';',
-                '  var c=Object.keys(S.sell||{});',
-                '  var n=0;',
-                '  c.forEach(function(k){',
-                '    var cap=k==="L"?(CFG.sizeCap||50000):(CFG.itemCap*2||100000);',
-                '    var v=Math.min(Math.max(S.sell[k]+step,priceMin),Math.min(cap,maxAllowed));',
-                '    if(v>0){S.sell[k]=v;n++}',
-                '  });',
-                '  save();',
-                '  var inps=document.querySelectorAll("input[data-g=sell]");',
-                '  inps.forEach(function(i){var k=i.dataset.k,v=S.sell[k];if(v!==undefined)i.value=v/1000});',
-                '  if(typeof paneGia==="function")paneGia();',
-                '  console.log("[BobaAuto] ⚡ giá ' + (step >= 0 ? '+' : '') + step + 'đ → " + n + "/" + c.length + " nguyên liệu");',
-                '})();'
-            ].join('\n');
-            var script = document.createElement('script');
-            script.textContent = code;
-            document.body.appendChild(script);
-            script.remove();
-        }
-
         function normalizePriceName(name) {
             return norm(String(name || '').replace(/\s*\(M\)\s*$/i, ''));
         }
@@ -427,7 +355,12 @@
                 var delta = used >= 10 ? CFG.priceStep : (used <= 2 ? -CFG.priceStep : 0);
                 if (delta) changes.push({ key: input.dataset.k, delta: delta, used: used });
             }
-            if (!changes.length) return 0;
+            if (!changes.length) return { count: 0, up: 0, down: 0 };
+            var priceSummary = {
+                count: changes.length,
+                up: changes.filter(function(change) { return change.delta > 0; }).length,
+                down: changes.filter(function(change) { return change.delta < 0; }).length
+            };
             var code = [
                 '(function(){',
                 '  var changes=' + JSON.stringify(changes) + ';',
@@ -450,15 +383,18 @@
             script.textContent = code;
             document.body.appendChild(script);
             script.remove();
-            return changes.length;
+            return priceSummary;
         }
 
         var optimizeBusy = false;
-        // tối ưu giá mỗi ngày theo số lượng từng món đã dùng hôm qua
+        // đặt giá theo số lượng từng món đã dùng hôm qua
         async function checkPriceOptimize() {
-            if (!CFG.optimizeEnabled) return;
             var curDay = getGameDay();
-            if (curDay < 1 || curDay === CFG.optimizeDayLast || optimizeBusy) return;
+            if (curDay < 1) {
+                showPriceSummary('⚠️ Chưa đọc được ngày game để đặt giá.');
+                return;
+            }
+            if (optimizeBusy) return;
             optimizeBusy = true;
             try {
                 var stats = await collectYesterdayDemand();
@@ -468,13 +404,13 @@
                     await sleep(250);
                 }
                 var changed = applyDemandPrices(stats);
-                CFG.optimizeDayLast = curDay;
-                saveOptimizeState();
                 var lg = document.getElementById('log-optimize');
-                if (lg) lg.textContent = '⚡ Ngày ' + curDay + ': đã chỉnh ' + changed + ' mục theo nhu cầu hôm qua';
-                trace('⚡ tối ưu giá ngày ' + curDay + ': ' + changed + ' mục, dữ liệu ' + stats.length + ' món');
+                if (lg) lg.textContent = '⚡ Ngày ' + curDay + ': đã chỉnh ' + changed.count + ' mục';
+                showPriceSummary('✅ Ngày ' + curDay + ': ' + changed.count + ' món\n↑ Tăng: ' + changed.up + '  ↓ Giảm: ' + changed.down + '\nDựa trên ' + stats.length + ' món đã bán hôm qua.');
+                trace('⚡ đặt giá ngày ' + curDay + ': ' + changed.count + ' mục, dữ liệu ' + stats.length + ' món');
             } catch (err) {
                 console.warn('[BobaAuto] Không tối ưu được giá ngày ' + curDay + ':', err);
+                showPriceSummary('❌ Không đặt được giá. Xem Console để biết chi tiết.');
             } finally {
                 optimizeBusy = false;
             }
@@ -1328,7 +1264,6 @@
         }
 
         function serveTick() {
-            checkPriceOptimize();
             if (!selling()) { releasePour(); return; }
             var now = Date.now();
 
