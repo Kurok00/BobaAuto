@@ -1,5 +1,11 @@
 # Lịch sử thay đổi
 
+## [40.1] - 2026-09-28
+
+- Thêm nút copy toàn bộ HTML hiện tại của webpage.
+- Loại UI debug của BobaAuto khỏi bản HTML copy để dễ soi DOM game.
+- Giữ snapshot v2 có trọng tâm cho việc phân tích giá, kho và tổng kết.
+
 ## [40.0] - 2026-09-28
 
 - Tách tài liệu thành README cho user và README_DEV cho developer.

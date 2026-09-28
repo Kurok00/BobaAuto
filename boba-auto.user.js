@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260928175110
+// @version      20260928180036
 // BUMP version mỗi lần commit để Tampermonkey nhận bản mới.
 // @description  Tự nhập hàng theo nhu cầu tối đa 2 ly/khách, tự phục vụ đúng trà - topping - đường - đá, tối ưu giá menu, giao diện responsive và chẩn đoán DOM.
 // @author       Kurok00
@@ -11,8 +11,8 @@
 // @run-at       document-idle
 // @homepageURL  https://github.com/Kurok00/BobaAuto
 // @supportURL   https://github.com/Kurok00/BobaAuto/issues
-// @updateURL    https://raw.githubusercontent.com/Kurok00/BobaAuto/0f119f6/boba-auto.user.js
-// @downloadURL  https://raw.githubusercontent.com/Kurok00/BobaAuto/0f119f6/boba-auto.user.js
+// @updateURL    https://raw.githubusercontent.com/Kurok00/BobaAuto/42c0618/boba-auto.user.js
+// @downloadURL  https://raw.githubusercontent.com/Kurok00/BobaAuto/42c0618/boba-auto.user.js
 // ==/UserScript==
 
 (function() {
@@ -22,7 +22,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '40.0',
+        appVersion: '40.1',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -61,7 +61,7 @@
         priceMin: 5000, // giá tối thiểu mỗi nguyên liệu
         priceCap: 120000, // trần giá tham chiếu của game (VND)
         priceCapSafety: 0.8, // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260928175110', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260928180036', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
@@ -99,6 +99,7 @@
             '<button id="btn-prep" style="background:#27ae60; color:white; border:none; padding:8px; border-radius:6px; font-weight:bold; font-size:12px; cursor:pointer; text-align:center;">⚡ Auto Nhập Hàng Thông Minh</button>' +
             '<button id="btn-diag" style="background:#2980b9; color:white; border:none; padding:8px; border-radius:6px; font-weight:bold; font-size:12px; cursor:pointer; text-align:center;">🔍 Chẩn Đoán DOM</button>' +
             '<button id="btn-scan-copy" style="background:#8e44ad; color:white; border:none; padding:8px; border-radius:6px; font-weight:bold; font-size:12px; cursor:pointer; text-align:center;">📋 Quét &amp; Copy Element</button>' +
+            '<button id="btn-scan-html" style="background:#16a085; color:white; border:none; padding:8px; border-radius:6px; font-weight:bold; font-size:12px; cursor:pointer; text-align:center;">📄 Copy toàn bộ HTML trang</button>' +
             '<div id="log-scan" style="font-size:11px; color:#2ecc71; margin-top:2px;"></div>' +
             '<hr style="border:0; border-top:1px solid #34495e; margin:4px 0;">' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autocup" checked><b>1. Lấy ly đúng size</b></label></div>' +
@@ -250,13 +251,22 @@
             });
         });
 
+        document.getElementById('btn-scan-html').addEventListener('click', function() {
+            setScanStatus('⏳ Đang copy toàn bộ HTML...', true);
+            copyTextToClipboard(collectFullPageHtml()).then(function(ok) {
+                setScanStatus(ok ? '✅ Đã copy toàn bộ HTML trang' : '⚠️ HTML đã tạo nhưng copy bị chặn; xem Console', ok);
+            }, function() {
+                setScanStatus('⚠️ Copy HTML bị chặn; xem Console', false);
+            });
+        });
+
         // kiểm tra bản mới từ GitHub
         function checkUpdate() {
             var statusEl = document.getElementById('mod-update-status');
             if (!statusEl) return;
             statusEl.textContent = '⏳ Đang kiểm tra...';
             var script = document.createElement('script');
-            script.textContent = '(function(){fetch("https://raw.githubusercontent.com/Kurok00/BobaAuto/0f119f6/boba-auto.user.js").then(function(r){return r.text()}).then(function(t){var m=t.match(/@version\s+(\d+)/);var e=document.getElementById("__boba_remote_version");if(e)e.textContent=m?m[1]:"";}).catch(function(){var e=document.getElementById("__boba_remote_version");if(e)e.textContent="ERR";})})();';
+            script.textContent = '(function(){fetch("https://raw.githubusercontent.com/Kurok00/BobaAuto/42c0618/boba-auto.user.js").then(function(r){return r.text()}).then(function(t){var m=t.match(/@version\s+(\d+)/);var e=document.getElementById("__boba_remote_version");if(e)e.textContent=m?m[1]:"";}).catch(function(){var e=document.getElementById("__boba_remote_version");if(e)e.textContent="ERR";})})();';
             document.body.appendChild(script);
             script.remove();
             var poll = setInterval(function() {
@@ -273,7 +283,7 @@
         function openScriptUpdate() {
             var statusEl = document.getElementById('mod-update-status');
             if (statusEl) statusEl.textContent = '⬆️ Đang mở trình cập nhật Tampermonkey...';
-            window.open('https://raw.githubusercontent.com/Kurok00/BobaAuto/0f119f6/boba-auto.user.js', '_blank', 'noopener');
+            window.open('https://raw.githubusercontent.com/Kurok00/BobaAuto/42c0618/boba-auto.user.js', '_blank', 'noopener');
         }
 
         function setScanStatus(msg, ok) {
@@ -395,6 +405,18 @@
             lines.push('--- SUMMARY CANDIDATES (' + summaryCandidates.length + ') ---');
             lines = lines.concat(summaryCandidates);
             return lines.join('\n');
+        }
+
+        function collectFullPageHtml() {
+            var clone = document.documentElement.cloneNode(true);
+            ['mod-menu', 'mod-icon', 'price-summary'].forEach(function(id) {
+                var injected = clone.querySelector ? clone.querySelector('#' + id) : null;
+                if (injected && injected.parentNode) injected.parentNode.removeChild(injected);
+            });
+            return '===== FULL PAGE HTML =====\n' +
+                'URL=' + location.href + '\n' +
+                'time=' + new Date().toISOString() + '\n' +
+                clone.outerHTML;
         }
 
         function copyTextToClipboard(text) {
