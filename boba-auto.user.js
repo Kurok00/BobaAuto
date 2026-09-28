@@ -1179,7 +1179,7 @@
             }
 
 
-            // ---- 4. ĐƯỜNG & ĐÁ ----
+            // ---- 4. ĐÁ & ĐƯỜNG ---- flow: ice -> sugar -> seal
             // Game CÓ THỂ BỎ QUA click của ta mà không báo lỗi:
             //  - đang Tạm dừng (đổi tab -> game tự pause, #modal hiện)  -> bỏ im lặng
             //  - nhân viên phụ quầy đang làm (toast "Nhân viên đang rót...")
@@ -1239,22 +1239,6 @@
                     return;
                 }
 
-                if (st.sugarClicks < tS) {
-                    if (now - st.lastPress > CFG.sugarRetryMs) {
-                        st.sugarTries++;
-                        triggerFullClick(sugarBtn);
-                        st.lastPress = now;
-                        trace('🍬 bấm nước đường (thử ' + st.sugarTries +
-                                   ', đã vào ly ' + st.sugarClicks + '/' + tS + ')');
-                        if (st.sugarTries > tS + 1) {
-                            traceOnce('sugarIgnored', '⚠️ game chưa nhận bấm đường sau ' + st.sugarTries +
-                                      ' lần thử | toast="' + getToastText() + '"' +
-                                      ' | hộp thoại=' + (gameModal() ? 'CÓ' : 'không') +
-                                      ' | hint="' + hint + '" | game chờ: "' + (getCoachHint() || '?') + '"');
-                        }
-                    }
-                    return;
-                }
                 if (st.iceClicks < tI) {
                     if (now - st.lastPress > CFG.sugarRetryMs) {
                         st.iceTries++;
@@ -1264,6 +1248,22 @@
                                    ', đã vào ly ' + st.iceClicks + '/' + tI + ')');
                         if (st.iceTries > tI + 1) {
                             traceOnce('iceIgnored', '⚠️ game chưa nhận bấm đá sau ' + st.iceTries +
+                                      ' lần thử | toast="' + getToastText() + '"' +
+                                      ' | hộp thoại=' + (gameModal() ? 'CÓ' : 'không') +
+                                      ' | hint="' + hint + '" | game chờ: "' + (getCoachHint() || '?') + '"');
+                        }
+                    }
+                    return;
+                }
+                if (st.sugarClicks < tS) {
+                    if (now - st.lastPress > CFG.sugarRetryMs) {
+                        st.sugarTries++;
+                        triggerFullClick(sugarBtn);
+                        st.lastPress = now;
+                        trace('🍬 bấm nước đường (thử ' + st.sugarTries +
+                                   ', đã vào ly ' + st.sugarClicks + '/' + tS + ')');
+                        if (st.sugarTries > tS + 1) {
+                            traceOnce('sugarIgnored', '⚠️ game chưa nhận bấm đường sau ' + st.sugarTries +
                                       ' lần thử | toast="' + getToastText() + '"' +
                                       ' | hộp thoại=' + (gameModal() ? 'CÓ' : 'không') +
                                       ' | hint="' + hint + '" | game chờ: "' + (getCoachHint() || '?') + '"');
