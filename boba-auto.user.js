@@ -716,16 +716,7 @@
             var m = document.getElementById('modal');
             return (m && !m.hasAttribute('hidden')) ? m : null;
         }
-        // bấm nút TIẾP TỤC an toàn trong hộp thoại. TUYỆT ĐỐI không bấm "Đóng cửa".
-        function autoResumeGame(modal) {
-            var btns = modal.querySelectorAll('button');
-            for (var i = 0; i < btns.length; i++) {
-                var txt = String(btns[i].textContent || '').replace(/\s+/g, ' ').trim();
-                if (/đóng cửa/i.test(txt)) continue;
-                if (/chơi tiếp|đã hiểu/i.test(txt)) { triggerFullClick(btns[i]); return txt; }
-            }
-            return null;
-        }
+
         function getPourPct() {
             var lv = document.getElementById('q3gLv');
             if (!lv) return null;
@@ -898,18 +889,11 @@
             var now = Date.now();
 
             // ---- HỘP THOẠI GAME (Tạm dừng / level-up / hỏi đáp) ----
-            // Đổi tab là game TỰ TẠM DỪNG (visibilitychange -> pauseGame), lúc này
-            // st.onclick của game BỎ MỌI click mà KHÔNG báo gì -> bước đường/đá bị "kẹt im".
-            // Tự bấm nút an toàn để chạy tiếp + đóng băng đồng hồ để khỏi bị tính kẹt.
+            // Đổi tab → game TỪ TẦM DỪNG → st.onclick BỎ MỌI click mà KHÔNG báo gì -> đường/đá bị "kẹt im".
+            // KHÔNG tự bấm nút tiếp tục (người dùng tự xử lý) — chỉ đông đồng hồ để khỏi bị tính kẹt.
             var modal = gameModal();
             if (modal) {
                 releasePour();
-                if (now - (SERVE.modalAt || 0) > 500) {
-                    SERVE.modalAt = now;
-                    var mbtn = autoResumeGame(modal);
-                    traceOnce('modal', '⏸ game đang mở hộp thoại -> tự bấm "' + (mbtn || '(chưa nhận ra nút an toàn, chờ bạn bấm tay)') +
-                              '" | nội dung: "' + String(modal.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 140) + '"');
-                }
                 SERVE.phaseAt = now;
                 return;
             }
