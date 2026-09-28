@@ -53,7 +53,14 @@
         cupClickGapMs: 700,
         sugarRetryMs: 900,       // chờ #q3hint cập nhật (animation game ~420ms) rồi mới bấm lại
         sugarBudgetMs: 10000,     // tổng ngân sách bước đường & đá, kể cả khi quay lại từ dán nắp
-        setPriceTargetK: 25       // giá mặc định mỗi nguyên liệu (nghìn đồng) khi bấm "Đặt giá"
+        setPriceTargetK: 25,       // giá mặc định mỗi nguyên liệu (nghìn đồng) khi bấm "Đặt giá"
+        optimizeEnabled: false,    // bật tối ưu giá tự động mỗi ngày
+        optimizeDayLast: 0,        // ngày cuối đã ghi nhận (0 = chưa bao giờ)
+        optimizeServedAtDayStart: 0, // S.served tại đầu ngày (đọc qua injection)
+        optimizeAvgCups: undefined,  // EMA số ly bán/ngày
+        priceStep: 1000,           // bước điều chỉnh mỗi lần (VND/nguyên liệu)
+        priceMin: 5000,            // giá tối thiểu mỗi nguyên liệu
+        priceCapSafety: 0.8,       // giá ly tối đa = priceCap * 0.8 = 96k
     };
 
     function initMod() {
@@ -99,7 +106,10 @@
             '<hr style="border:0; border-top:1px solid #e67e22; margin:4px 0;">' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-setprice"><b>⚡ Đặt giá bán (thử nghiệm)</b></label></div>' +
             '<div id="row-setprice" style="display:none; ' + row + '"><input type="number" id="inp-price-k" value="25" min="1" max="100" step="1" style="width:60px; padding:2px; text-align:center;"><span>k/mục</span> <button id="btn-setprice" style="background:#e67e22; color:white; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:11px;">Áp dụng</button></div>' +
-            '<div id="log-setprice" style="font-size:11px; color:#2ecc71; margin-top:2px;"></div>';
+            '<div id="log-setprice" style="font-size:11px; color:#2ecc71; margin-top:2px;"></div>' +
+            '<hr style="border:0; border-top:1px solid #27ae60; margin:4px 0;">' +
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-optimize"><b>⚡ Tối ưu giá mỗi ngày</b></label></div>' +
+            '<div id="log-optimize" style="font-size:11px; color:#2ecc71; margin-top:2px;"></div>';
         menuEl.appendChild(bodyEl);
         document.body.appendChild(menuEl);
 
@@ -156,6 +166,13 @@
         var rowSetPrice = document.getElementById('row-setprice');
         var logSetPrice = document.getElementById('log-setprice');
         chkSetPrice.addEventListener('change', function() { rowSetPrice.style.display = chkSetPrice.checked ? 'flex' : 'none'; });
+        var chkOptimize = document.getElementById('chk-optimize');
+        chkOptimize.addEventListener('change', function() {
+            CFG.optimizeEnabled = chkOptimize.checked;
+            CFG.optimizeDayLast = 0;
+            CFG.optimizeAvgCups = undefined;
+            trace(chkOptimize.checked ? '⚡ Tối ưu giá BẬT — mỗi ngày sẽ tự điều chỉnh' : '⚡ Tối ưu giá TẮT');
+        });
 
         function applySetPrice(targetK) {
             var targetVND = Math.round(Math.max(1, +targetK || CFG.setPriceTargetK) * 1000);
@@ -188,6 +205,72 @@
             var k = Math.max(1, Math.min(100, parseInt(inpPriceK.value) || CFG.setPriceTargetK));
             applySetPrice(k);
         });
+
+        // đọc S.served từ page scope qua injection
+        function getPageServed() {
+            var el = document.getElementById('__boba_served');
+            if (!el) { el = document.createElement('div'); el.id = '__boba_served'; el.style.display = 'none'; document.body.appendChild(el); }
+            var script = document.createElement('script');
+            script.textContent = '(function(){var e=document.getElementById("__boba_served");if(e)e.textContent=(S.served||0);})();';
+            document.body.appendChild(script); script.remove();
+            var v = parseInt(el.textContent, 10);
+            return isFinite(v) ? v : -1;
+        }
+
+        // điều chỉnh giá tất cả nguyên liệu ±step (uniform)
+        function adjustPricesBy(step) {
+            var maxAllowed = Math.round(CFG.priceCap * CFG.priceCapSafety);
+            var code = [
+                '(function() {',
+                '  var step=' + step + ';',
+                '  var maxAllowed=' + maxAllowed + ';',
+                '  var priceMin=' + CFG.priceMin + ';',
+                '  var c=Object.keys(S.sell||{});',
+                '  var n=0;',
+                '  c.forEach(function(k){',
+                '    var cap=k==="L"?(CFG.sizeCap||50000):(CFG.itemCap*2||100000);',
+                '    var v=Math.min(Math.max(S.sell[k]+step,priceMin),Math.min(cap,maxAllowed));',
+                '    if(v>0){S.sell[k]=v;n++}',
+                '  });',
+                '  save();',
+                '  var inps=document.querySelectorAll("input[data-g=sell]");',
+                '  inps.forEach(function(i){var k=i.dataset.k,v=S.sell[k];if(v!==undefined)i.value=v/1000});',
+                '  if(typeof paneGia==="function")paneGia();',
+                '  console.log("[BobaAuto] ⚡ giá ' + (step>=0?'+':'') + step + 'đ → " + n + "/" + c.length + " nguyên liệu");',
+                '})();'
+            ].join('\n');
+            var script = document.createElement('script');
+            script.textContent = code;
+            document.body.appendChild(script);
+            script.remove();
+        }
+
+        // phát hiện ngày mới, điều chỉnh giá dựa trên số ly bán
+        function checkPriceOptimize() {
+            if (!CFG.optimizeEnabled) return;
+            var curDay = getGameDay();
+            if (curDay === CFG.optimizeDayLast) return;
+            var curServed = getPageServed();
+            if (curServed < 0) return;
+            var cupsToday = curServed - CFG.optimizeServedAtDayStart;
+            if (CFG.optimizeDayLast > 0) {
+                var prevCups = CFG.optimizeAvgCups || cupsToday;
+                if (cupsToday > prevCups * 1.15) {
+                    adjustPricesBy(+CFG.priceStep);
+                    trace('⚡ giá ↑ +' + CFG.priceStep + 'đ (ly ' + Math.round(prevCups) + '→' + cupsToday + ')');
+                } else if (cupsToday < prevCups * 0.85) {
+                    adjustPricesBy(-CFG.priceStep);
+                    trace('⚡ giá ↓ −' + CFG.priceStep + 'đ (ly ' + Math.round(prevCups) + '→' + cupsToday + ')');
+                } else {
+                    trace('⚡ giá giữ (ly ' + Math.round(prevCups) + '→' + cupsToday + ')');
+                }
+                CFG.optimizeAvgCups = (CFG.optimizeAvgCups || 0) * 0.7 + cupsToday * 0.3;
+                var lg = document.getElementById('log-optimize');
+                if (lg) lg.textContent = '⚡ ' + (cupsToday > prevCups * 1.15 ? '↑' : cupsToday < prevCups * 0.85 ? '↓' : '→') + ' ly ' + Math.round(prevCups) + '→' + cupsToday + ' | bước ' + CFG.priceStep + 'đ';
+            }
+            CFG.optimizeServedAtDayStart = curServed;
+            CFG.optimizeDayLast = curDay;
+        }
 
         // ---------------- sự kiện giả ----------------
         // pointerdown/pointerup phải là PointerEvent thật, nếu dùng MouseEvent
@@ -938,6 +1021,7 @@
         }
 
         function serveTick() {
+            checkPriceOptimize();
             if (!selling()) { releasePour(); return; }
             var now = Date.now();
 
