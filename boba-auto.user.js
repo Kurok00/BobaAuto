@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260928170639  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
+// @version      20260928171424  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '35.6',
+        appVersion: '35.7',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -58,7 +58,7 @@
         priceMin: 5000, // giá tối thiểu mỗi nguyên liệu
         priceCap: 120000, // trần giá tham chiếu của game (VND)
         priceCapSafety: 0.8, // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260928170639', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260928171424', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
@@ -291,68 +291,88 @@
         }
 
         function collectElementScan() {
-            var root = document.body || document.documentElement;
-            var lines = ['===== ELEMENT SNAPSHOT =====', 'URL=' + location.href, 'time=' + new Date().toISOString()];
+            var lines = ['===== ELEMENT SNAPSHOT v2 =====', 'URL=' + location.href, 'time=' + new Date().toISOString()];
+            var stateIds = ['hDay', 'hSub', 'hMoney', 'q3say', 'q3hint', 'q3coach', 'q3cup', 'q3noCup', 'q3b_sugar', 'q3b_ice', 'q3_M', 'q3_L', 'q3seal', 'toast', 'mod-menu'];
+            lines.push('--- KEY STATE ---');
+            for (var s = 0; s < stateIds.length; s++) {
+                var stateEl = document.getElementById(stateIds[s]);
+                if (!stateEl) {
+                    lines.push('#' + stateIds[s] + ' = MISSING');
+                    continue;
+                }
+                var stateStyle = window.getComputedStyle ? window.getComputedStyle(stateEl) : null;
+                lines.push('#' + stateIds[s] + ' = ' + JSON.stringify({
+                    text: sanitizeText(stateEl.textContent || stateEl.innerText || '').slice(0, 300),
+                    hidden: !!(stateEl.hidden || (stateStyle && stateStyle.display === 'none') || stateEl.getAttribute('aria-hidden') === 'true'),
+                    disabled: !!(stateEl.disabled || stateEl.getAttribute('aria-disabled') === 'true'),
+                    class: stateEl.className || '',
+                    html: shortHtml(stateEl, 320)
+                }));
+            }
+            var targetSelectors = ['#q3', '#q3say', '#q3zones', '#q3cup', '#q3hint', '#q3coach', '#toast', '#modal', '#mod-menu', '.tab[data-tab="kho"]', '.tab[data-tab="gia"]'];
+            var linesByTarget = [];
             var seen = new Set();
-            var els = Array.prototype.slice.call(root.querySelectorAll('*'));
-            els.unshift(root);
-            var count = 0;
-
-            for (var i = 0; i < els.length && count < 80; i++) {
-                var el = els[i];
-                if (!el || el.nodeType !== 1) continue;
-                if (seen.has(el)) continue;
-                seen.add(el);
-
-                var tag = (el.tagName || '').toLowerCase();
-                if (!tag) continue;
-                var id = el.getAttribute ? el.getAttribute('id') : '';
-                var role = el.getAttribute ? el.getAttribute('role') : '';
-                var attrs = [];
-                if (el.attributes) {
-                    for (var a = 0; a < el.attributes.length; a++) {
-                        var at = el.attributes[a];
-                        if (/^data-|^aria-|^id$|^class$|^role$|^type$|^value$|^href$|^src$/.test(at.name)) {
-                            attrs.push(at.name + '=' + JSON.stringify(String(at.value).slice(0, 60)));
+            for (var t = 0; t < targetSelectors.length; t++) {
+                var target = document.querySelector(targetSelectors[t]);
+                if (!target) continue;
+                var targetEls = [target].concat(Array.prototype.slice.call(target.querySelectorAll('button, input, select, textarea, [role], [data-a], [data-g], [data-k], [aria-label], img, svg, .q3badge, .q3tag')));
+                for (var e = 0; e < targetEls.length; e++) {
+                    var el = targetEls[e];
+                    if (!el || el.nodeType !== 1 || seen.has(el)) continue;
+                    seen.add(el);
+                    var tag = (el.tagName || '').toLowerCase();
+                    var attrs = [];
+                    if (el.attributes) {
+                        for (var a = 0; a < el.attributes.length; a++) {
+                            var at = el.attributes[a];
+                            if (/^data-|^aria-|^id$|^class$|^role$|^type$|^value$|^hidden$/.test(at.name)) {
+                                attrs.push(at.name + '=' + JSON.stringify(String(at.value).slice(0, 100)));
+                            }
                         }
                     }
+                    var style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+                    var rect = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+                    var text = sanitizeText(el.textContent || el.innerText || '').slice(0, 240);
+                    linesByTarget.push('[' + tag + '] selector-root=' + targetSelectors[t] +
+                        ' id=' + JSON.stringify(el.id || '') +
+                        ' text=' + JSON.stringify(text) +
+                        ' state=' + JSON.stringify({
+                            hidden: !!(el.hidden || (style && style.display === 'none') || el.getAttribute('aria-hidden') === 'true'),
+                            disabled: !!(el.disabled || el.getAttribute('aria-disabled') === 'true'),
+                            display: style ? style.display : '?',
+                            rect: rect ? [Math.round(rect.left), Math.round(rect.top), Math.round(rect.width), Math.round(rect.height)] : null
+                        }) +
+                        ' attrs=' + attrs.join(', ') +
+                        ' html=' + JSON.stringify(shortHtml(el, 280)));
                 }
-                var text = sanitizeText(el.textContent || el.innerText || '');
-                var hidden = (el.hidden === true) || (el.style && el.style.display === 'none') || (el.getAttribute && el.getAttribute('aria-hidden') === 'true');
-                if (hidden && !id && !role && !attrs.length && !text) continue;
-                var important = !!(id || role || attrs.length || /button|input|textarea|select|a|label|img|svg|div|span|main|header|section|nav|aside|button|td|th|li|p|h1|h2|h3/.test(tag));
-                if (!important) continue;
-                if (text.length > 200) text = text.slice(0, 200) + '...';
-                var label = '[' + tag + ']';
-                if (id) label += ' id=' + id;
-                if (role) label += ' role=' + role;
-                if (attrs.length) label += ' attrs=' + attrs.slice(0, 3).join(', ');
-                lines.push(label + ' text=' + JSON.stringify(text) + ' html=' + JSON.stringify(shortHtml(el, 180)));
-                count++;
             }
-
-            if (lines.length <= 3) {
-                lines.push('No visible element found.');
+            lines.push('--- TARGETED ELEMENTS (' + linesByTarget.length + ') ---');
+            lines = lines.concat(linesByTarget);
+            if (!linesByTarget.length) {
+                lines.push('No targeted game element found. The game may still be on the preparation screen.');
             }
             return lines.join('\n');
         }
 
         function copyTextToClipboard(text) {
-            if (navigator.clipboard && window.isSecureContext) {
-                return navigator.clipboard.writeText(text).then(function() { return true; }).catch(function() { return false; });
+            function legacyCopy() {
+                var ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.left = '-9999px';
+                ta.style.top = '-9999px';
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                var ok = false;
+                try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+                ta.remove();
+                return ok;
             }
-            var ta = document.createElement('textarea');
-            ta.value = text;
-            ta.style.position = 'fixed';
-            ta.style.left = '-9999px';
-            ta.style.top = '-9999px';
-            document.body.appendChild(ta);
-            ta.focus();
-            ta.select();
-            var ok = false;
-            try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
-            ta.remove();
-            return Promise.resolve(ok);
+            if (navigator.clipboard && window.isSecureContext) {
+                return navigator.clipboard.writeText(text).then(function() { return true; }).catch(function() { return legacyCopy(); });
+            }
+            return Promise.resolve(legacyCopy());
         }
 
         function normalizePriceName(name) {
