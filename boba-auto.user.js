@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260928165206  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
+// @version      20260928170639  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,14 +21,14 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '35.5',
+        appVersion: '35.6',
 
         // ---------- kho ----------
         fallbackBudget: 50,
         clickDelay: 40,
         tabDelay: 320,
         maxReduceRounds: 60,
-        cupsPerCustomer: 1,
+        cupsPerCustomer: 2, // dự phòng trường hợp một khách mua 2 ly; áp dụng đồng bộ cho trà, topping và ly
         toppingPerCustomer: 0.5,
         restockBuffer: 12, // dự phòng cố định
         restockBufferPerDay: 2, // cộng thêm 2 phần cho MỖI ngày đã qua (nhu cầu tăng dần)
@@ -58,7 +58,7 @@
         priceMin: 5000, // giá tối thiểu mỗi nguyên liệu
         priceCap: 120000, // trần giá tham chiếu của game (VND)
         priceCapSafety: 0.8, // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260928165206', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260928170639', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
