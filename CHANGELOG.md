@@ -1,5 +1,12 @@
 # Lịch sử thay đổi
 
+## [35.9] - 2026-09-28
+
+- Ưu tiên nhập đủ ly trước khi phân bổ ngân sách cho trà và topping.
+- Chỉnh giá theo phần trăm giá vốn, làm tròn theo bước 0,5k của game.
+- Kết hợp số lượng bán hôm qua với tín hiệu `rẻ / đắt` của game.
+- Bỏ qua món không có dữ liệu bán thay vì mặc định bán 0 rồi hạ giá.
+
 ## [35.8] - 2026-09-28
 
 - Mở rộng bộ quét màn Chuẩn bị để lấy input giá menu hiện tại.

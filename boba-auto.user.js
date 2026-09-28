@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260928172818
+// @version      20260928174823
 // BUMP version mỗi lần commit để Tampermonkey nhận bản mới.
 // @description  Tự nhập hàng theo nhu cầu tối đa 2 ly/khách, tự phục vụ đúng trà - topping - đường - đá, tối ưu giá menu, giao diện responsive và chẩn đoán DOM.
 // @author       Kurok00
@@ -11,8 +11,8 @@
 // @run-at       document-idle
 // @homepageURL  https://github.com/Kurok00/BobaAuto
 // @supportURL   https://github.com/Kurok00/BobaAuto/issues
-// @updateURL    https://raw.githubusercontent.com/Kurok00/BobaAuto/2d3801b/boba-auto.user.js
-// @downloadURL  https://raw.githubusercontent.com/Kurok00/BobaAuto/2d3801b/boba-auto.user.js
+// @updateURL    https://raw.githubusercontent.com/Kurok00/BobaAuto/f4a0ea2/boba-auto.user.js
+// @downloadURL  https://raw.githubusercontent.com/Kurok00/BobaAuto/f4a0ea2/boba-auto.user.js
 // ==/UserScript==
 
 (function() {
@@ -22,7 +22,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '35.8',
+        appVersion: '35.9',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -56,10 +56,12 @@
         sugarBudgetMs: 10000, // tổng ngân sách bước đường & đá, kể cả khi quay lại từ dán nắp
         setPriceTargetK: 25, // giá mặc định mỗi nguyên liệu (nghìn đồng) khi bấm "Đặt giá"
         priceStep: 1000, // bước điều chỉnh mỗi lần (VND/nguyên liệu)
+        priceAdjustPct: 25, // mỗi lần chỉnh = 25% giá vốn, thay vì cố định 1k/2k
+        priceMinStep: 500, // game cho nhập theo bước 0,5k
         priceMin: 5000, // giá tối thiểu mỗi nguyên liệu
         priceCap: 120000, // trần giá tham chiếu của game (VND)
         priceCapSafety: 0.8, // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260928172818', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260928174823', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
@@ -254,7 +256,7 @@
             if (!statusEl) return;
             statusEl.textContent = '⏳ Đang kiểm tra...';
             var script = document.createElement('script');
-            script.textContent = '(function(){fetch("https://raw.githubusercontent.com/Kurok00/BobaAuto/2d3801b/boba-auto.user.js").then(function(r){return r.text()}).then(function(t){var m=t.match(/@version\s+(\d+)/);var e=document.getElementById("__boba_remote_version");if(e)e.textContent=m?m[1]:"";}).catch(function(){var e=document.getElementById("__boba_remote_version");if(e)e.textContent="ERR";})})();';
+            script.textContent = '(function(){fetch("https://raw.githubusercontent.com/Kurok00/BobaAuto/f4a0ea2/boba-auto.user.js").then(function(r){return r.text()}).then(function(t){var m=t.match(/@version\s+(\d+)/);var e=document.getElementById("__boba_remote_version");if(e)e.textContent=m?m[1]:"";}).catch(function(){var e=document.getElementById("__boba_remote_version");if(e)e.textContent="ERR";})})();';
             document.body.appendChild(script);
             script.remove();
             var poll = setInterval(function() {
@@ -271,7 +273,7 @@
         function openScriptUpdate() {
             var statusEl = document.getElementById('mod-update-status');
             if (statusEl) statusEl.textContent = '⬆️ Đang mở trình cập nhật Tampermonkey...';
-            window.open('https://raw.githubusercontent.com/Kurok00/BobaAuto/2d3801b/boba-auto.user.js', '_blank', 'noopener');
+            window.open('https://raw.githubusercontent.com/Kurok00/BobaAuto/f4a0ea2/boba-auto.user.js', '_blank', 'noopener');
         }
 
         function setScanStatus(msg, ok) {
@@ -441,6 +443,22 @@
             return stats;
         }
 
+        function readPriceCostVND(input) {
+            var row = input && input.closest ? input.closest('.rowi') : null;
+            var costEl = row ? row.querySelector('.sub') : null;
+            var text = costEl ? sanitizeText(costEl.textContent || costEl.innerText || '') : '';
+            var match = /vốn\s+([\d.,]+)\s*k/i.exec(text);
+            if (!match) return null;
+            var costK = parseViNumber(match[1]);
+            return isFinite(costK) && costK > 0 ? Math.round(costK * 1000) : null;
+        }
+
+        function priceDeltaByCost(costVND, factor) {
+            if (!costVND) return CFG.priceStep * factor;
+            var raw = costVND * CFG.priceAdjustPct / 100 * factor;
+            return Math.max(CFG.priceMinStep, Math.round(raw / CFG.priceMinStep) * CFG.priceMinStep);
+        }
+
         function applyDemandPrices(stats) {
             var inputs = document.querySelectorAll('input[data-g="sell"][data-k]');
             var changes = [];
@@ -448,13 +466,27 @@
                 var input = inputs[i];
                 var label = normalizePriceName(input.getAttribute('aria-label') || input.dataset.k);
                 var used = 0;
+                var hasDemand = false;
                 for (var j = 0; j < stats.length; j++) {
                     if (label.indexOf(stats[j].name) !== -1 || stats[j].name.indexOf(label) !== -1) {
                         used = Math.max(used, stats[j].used);
+                        hasDemand = true;
                     }
                 }
-                var delta = used >= 10 ? CFG.priceStep : (used <= 2 ? -CFG.priceStep : 0);
-                if (delta) changes.push({ key: input.dataset.k, delta: delta, used: used });
+                if (!hasDemand) continue;
+                var row = input.closest ? input.closest('.rowi') : null;
+                var signalEl = row ? row.querySelector('.okline') : null;
+                var signal = normalizePriceName(signalEl ? signalEl.textContent : '');
+                var costVND = readPriceCostVND(input);
+                var delta = 0;
+                if (/rẻ|cheap/i.test(signal)) {
+                    delta = priceDeltaByCost(costVND, used >= 10 ? 1 : 0.5);
+                } else if (/đắt|expensive/i.test(signal)) {
+                    delta = -priceDeltaByCost(costVND, 1);
+                } else {
+                    delta = used >= 10 ? priceDeltaByCost(costVND, 1) : (used <= 2 ? -priceDeltaByCost(costVND, 0.5) : 0);
+                }
+                if (delta) changes.push({ key: input.dataset.k, delta: delta, used: used, signal: signal || 'không rõ', costVND: costVND });
             }
             if (!changes.length) return { count: 0, up: 0, down: 0 };
             var priceSummary = {
@@ -488,7 +520,7 @@
         }
 
         var optimizeBusy = false;
-        // đặt giá theo số lượng từng món đã dùng hôm qua
+        // đặt giá theo nhu cầu hôm qua và tín hiệu giá của game
         async function checkPriceOptimize() {
             var curDay = getGameDay();
             if (curDay < 1) {
@@ -954,6 +986,11 @@
                 await resetAllPlans();
                 await sleep(150);
 
+                // Ưu tiên ly trước: thiếu ly thì không thể bán, còn trà/topping có thể giảm theo ví.
+                var cupNeed = demand;
+                console.log('🥤 ƯU TIÊN LY: cần tối thiểu ' + cupNeed + ' ly (+' + buffer + ' dự phòng) trước khi chia tiền cho nguyên liệu.');
+                await planTab('2', function() { return cupNeed + buffer; }, budget, budgetKnown, 'Ly');
+
                 await selectTab('0');
                 var teaCount = getActiveRows().length;
                 var teaPlan = splitNeed(demand, teaCount);
@@ -964,9 +1001,6 @@
 
                 var toppingNeed = Math.max(1, Math.round(demand * CFG.toppingPerCustomer));
                 await planTab('1', function(j, n) { return Math.max(1, Math.round(toppingNeed / n)) + buffer; }, budget, budgetKnown, 'Topping');
-
-                var cupNeed = Math.max(demand, teaSum);
-                await planTab('2', function() { return cupNeed + buffer; }, budget, budgetKnown, 'Ly');
                 console.log('   → Ly: cần ' + cupNeed + ' (+' + buffer + ' dự phòng).');
 
                 await sleep(300);
