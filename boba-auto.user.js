@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260928000000
+// @version      20260928000001
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '34.7',
+        appVersion: '34.8',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -50,7 +50,9 @@
         stuckMs: 20000,          // bước nào đứng quá lâu thì coi là kẹt, đổ ly làm lại
         maxRestarts: 4,          // liên tục đổ ly quá số lần thì dừng, báo lỗi
         traceRepeatLimit: 4,     // tránh log spam khi máy trạng thái lặp
-        cupClickGapMs: 700
+        cupClickGapMs: 700,
+        sugarRetryMs: 900,       // chờ #q3hint cập nhật (animation game ~420ms) rồi mới bấm lại
+        sugarBudgetMs: 10000     // tổng ngân sách bước đường & đá, kể cả khi quay lại từ dán nắp
     };
 
     function initMod() {
@@ -605,7 +607,8 @@
                 sealTries: 0, restarts: 0, declAt: 0,
                 lastCupClick: 0, trashAt: 0, lastPhaseLog: '',
                 spamGuard: {},
-                sugarClicks: 0, iceClicks: 0, sugarTarget: 0, iceTarget: 0, sugarTargetsRead: false
+                sugarClicks: 0, iceClicks: 0, sugarTarget: 0, iceTarget: 0,
+                sugarAt: 0, sugarTries: 0, iceTries: 0
             };
         }
         var SERVE = freshServe();
@@ -682,6 +685,46 @@
             if (/ít\s*đá/i.test(say)) return 1;
             if (/đá\s*bình\s*thường/i.test(say)) return 2;
             return 0;
+        }
+        // ---- đọc TRẠNG THÁI THỰC TẾ của game (không tin vào click của mình) ----
+        // #q3hint = "Đường 30% · ít đá" -> cập nhật ~420ms sau khi game NHẬN bấm đường/đá.
+        // Nếu bấm mà hint không đổi = game đang bỏ qua click (tạm dừng / nhân viên phụ quầy
+        // đang làm / máy đang dán nắp).
+        function getHintText() {
+            var h = document.getElementById('q3hint');
+            return h ? String(h.textContent || '').replace(/\s+/g, ' ').trim() : '';
+        }
+        function hintSugarPresses(h) {
+            var m = /(\d+)\s*%/.exec(h || '');
+            if (!m) return 0;
+            var p = +m[1];
+            return p >= 100 ? 4 : p >= 70 ? 3 : p >= 50 ? 2 : p >= 30 ? 1 : 0;
+        }
+        function hintIceScoops(h) {
+            if (/ít\s*đá/i.test(h || '')) return 1;
+            if (/đá\s*bình\s*thường/i.test(h || '')) return 2;
+            return 0;
+        }
+        // toast hiện đang hiển thị (game thường báo rõ lý do bỏ qua click)
+        function getToastText() {
+            var t = document.getElementById('toast');
+            if (!t || !t.classList.contains('show')) return '';
+            return String(t.textContent || '').replace(/\s+/g, ' ').trim();
+        }
+        // hộp thoại của game: Tạm dừng (đổi tab là game tự pause), level-up, hỏi đáp...
+        function gameModal() {
+            var m = document.getElementById('modal');
+            return (m && !m.hasAttribute('hidden')) ? m : null;
+        }
+        // bấm nút TIẾP TỤC an toàn trong hộp thoại. TUYỆT ĐỐI không bấm "Đóng cửa".
+        function autoResumeGame(modal) {
+            var btns = modal.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+                var txt = String(btns[i].textContent || '').replace(/\s+/g, ' ').trim();
+                if (/đóng cửa/i.test(txt)) continue;
+                if (/chơi tiếp|đã hiểu/i.test(txt)) { triggerFullClick(btns[i]); return txt; }
+            }
+            return null;
         }
         function getPourPct() {
             var lv = document.getElementById('q3gLv');
@@ -854,6 +897,23 @@
             if (!selling()) { releasePour(); return; }
             var now = Date.now();
 
+            // ---- HỘP THOẠI GAME (Tạm dừng / level-up / hỏi đáp) ----
+            // Đổi tab là game TỰ TẠM DỪNG (visibilitychange -> pauseGame), lúc này
+            // st.onclick của game BỎ MỌI click mà KHÔNG báo gì -> bước đường/đá bị "kẹt im".
+            // Tự bấm nút an toàn để chạy tiếp + đóng băng đồng hồ để khỏi bị tính kẹt.
+            var modal = gameModal();
+            if (modal) {
+                releasePour();
+                if (now - (SERVE.modalAt || 0) > 500) {
+                    SERVE.modalAt = now;
+                    var mbtn = autoResumeGame(modal);
+                    traceOnce('modal', '⏸ game đang mở hộp thoại -> tự bấm "' + (mbtn || '(chưa nhận ra nút an toàn, chờ bạn bấm tay)') +
+                              '" | nội dung: "' + String(modal.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 140) + '"');
+                }
+                SERVE.phaseAt = now;
+                return;
+            }
+
             // ---- WATCHDOG: bước đứng quá lâu thì tự thoát, không để treo vô hạn ----
             if (SERVE.phase !== 'cup' && SERVE.phase !== 'idle' && now - SERVE.phaseAt > CFG.stuckMs) {
                 releasePour();
@@ -862,6 +922,7 @@
                       ' (giữa chừng) — lần đổ ly thứ ' + SERVE.restarts +
                       '\n    order: "' + (SERVE.order || '?') + '" | ly: ' + cupSignal() +
                       '\n    game đang chờ: "' + (getCoachHint() || '?') + '" | kiên nhẫn: ' + getPatience() +
+                      '\n    #q3hint = "' + getHintText() + '" | toast = "' + getToastText() + '"' +
                       '\n    hũ trà: ' + (getWantedTeaBtn() ? 'có' : 'KHÔNG CÓ') +
                       ' | nút topping: ' + (getWantedTopBtn() ? 'có' : 'KHÔNG CÓ'));
                 if (SERVE.restarts >= CFG.maxRestarts) {
@@ -1126,6 +1187,12 @@
 
 
             // ---- 4. ĐƯỜNG & ĐÁ ----
+            // Game CÓ THỂ BỎ QUA click của ta mà không báo lỗi:
+            //  - đang Tạm dừng (đổi tab -> game tự pause, #modal hiện)  -> bỏ im lặng
+            //  - nhân viên phụ quầy đang làm (toast "Nhân viên đang rót...")
+            //  - máy đang dán nắp R.sealing (bỏ im lặng)
+            // Nên KHÔNG đếm click mù: đọc TIẾN ĐỘ THỰC TẾ từ #q3hint
+            // ("Đường 30% · ít đá"), chỉ bấm cho tới khi hint đúng mới qua bước sau.
             if (st.phase === 'sugar') {
                 var chkSugar = document.getElementById('chk-autosugar');
                 if (!chkSugar || !chkSugar.checked) { setPhase('seal'); return; }
@@ -1134,36 +1201,67 @@
                 var iceBtn = document.getElementById('q3b_ice');
                 if (!sugarBtn || !iceBtn) { setPhase('seal'); return; }
 
-                if (!st.sugarTargetsRead) {
-                    st.sugarTargetsRead = true;
-                    st.sugarTarget = getSugarPresses(say);
-                    st.iceTarget = getIceScoops(say);
+                var tS = getSugarPresses(say), tI = getIceScoops(say);
+                if (tS !== st.sugarTarget || tI !== st.iceTarget) {
+                    st.sugarTarget = tS;
+                    st.iceTarget = tI;
+                    st.sugarClicks = 0;
+                    st.iceClicks = 0;
                     st.lastPress = 0;
-                    trace('🧊 đường & đá: bấm nước đường ' + st.sugarTarget + ' lần, xúc đá ' + st.iceTarget + ' lần');
+                    st.sugarTries = 0;
+                    st.iceTries = 0;
+                    st.sugarAt = now;
+                    trace('🧊 đường & đá: nước đường ' + tS + ' lần, xúc đá ' + tI + ' lần | đơn: "' + say + '"');
                 }
 
-                if (now - st.phaseAt > 5000) {
-                    traceOnce('sugarTimeout', '⚠️ đường & đá quá 5s → dán nắp luôn');
+                var hint = getHintText();
+                var doneS = hintSugarPresses(hint), doneI = hintIceScoops(hint);
+                if (doneS !== st.sugarClicks || doneI !== st.iceClicks) {
+                    st.sugarClicks = doneS;
+                    st.iceClicks = doneI;
+                    trace('🍬 game xác nhận: đường ' + doneS + '/' + tS + ' | đá ' + doneI + '/' + tI +
+                          ' | hint="' + hint + '"');
+                }
+
+                if (st.sugarAt && now - st.sugarAt > CFG.sugarBudgetMs) {
+                    traceOnce('sugarTimeout', '⚠️ đường & đá quá ' + Math.round(CFG.sugarBudgetMs / 1000) +
+                              's (đã vào ly: đường ' + doneS + '/' + tS + ', đá ' + doneI + '/' + tI + ') -> dán nắp' +
+                              ' | hint="' + hint + '" | toast="' + getToastText() + '"' +
+                              ' | hộp thoại=' + (gameModal() ? 'CÓ' : 'không') +
+                              ' | game chờ: "' + (getCoachHint() || '?') + '"');
                     setPhase('seal');
                     return;
                 }
 
-                var sugarDelay = 350;
-                if (st.sugarClicks < st.sugarTarget) {
-                    if (now - st.lastPress > sugarDelay) {
+                if (st.sugarClicks < tS) {
+                    if (now - st.lastPress > CFG.sugarRetryMs) {
+                        st.sugarTries++;
                         triggerFullClick(sugarBtn);
-                        st.sugarClicks++;
                         st.lastPress = now;
-                        trace('🍬 bấm nước đường lần ' + st.sugarClicks + '/' + st.sugarTarget);
+                        traceOnce('sugarTap', '🍬 bấm nước đường (thử ' + st.sugarTries +
+                                  ', đã vào ly ' + st.sugarClicks + '/' + tS + ')');
+                        if (st.sugarTries > tS + 1) {
+                            traceOnce('sugarIgnored', '⚠️ game chưa nhận bấm đường sau ' + st.sugarTries +
+                                      ' lần thử | toast="' + getToastText() + '"' +
+                                      ' | hộp thoại=' + (gameModal() ? 'CÓ' : 'không') +
+                                      ' | hint="' + hint + '" | game chờ: "' + (getCoachHint() || '?') + '"');
+                        }
                     }
                     return;
                 }
-                if (st.iceClicks < st.iceTarget) {
-                    if (now - st.lastPress > sugarDelay) {
+                if (st.iceClicks < tI) {
+                    if (now - st.lastPress > CFG.sugarRetryMs) {
+                        st.iceTries++;
                         triggerFullClick(iceBtn);
-                        st.iceClicks++;
                         st.lastPress = now;
-                        trace('🧊 xúc đá lần ' + st.iceClicks + '/' + st.iceTarget);
+                        traceOnce('iceTap', '🧊 xúc đá (thử ' + st.iceTries +
+                                  ', đã vào ly ' + st.iceClicks + '/' + tI + ')');
+                        if (st.iceTries > tI + 1) {
+                            traceOnce('iceIgnored', '⚠️ game chưa nhận bấm đá sau ' + st.iceTries +
+                                      ' lần thử | toast="' + getToastText() + '"' +
+                                      ' | hộp thoại=' + (gameModal() ? 'CÓ' : 'không') +
+                                      ' | hint="' + hint + '" | game chờ: "' + (getCoachHint() || '?') + '"');
+                        }
                     }
                     return;
                 }
@@ -1182,12 +1280,28 @@
                 }
                 // đơn hàng đổi rồi = đã giao cho khách mới, vòng reset sẽ xử lý
                 if (getOrderText() !== st.order) { st.phase = 'idle'; return; }
+                // chưa đủ đường/đá (theo #q3hint) mà đã lết sang dán nắp thì game sẽ
+                // KHÔNG BAO GIỜ nhận nắp (ready() báo "Chưa chọn đường/đá") -> vô ích,
+                // quay lại làm nốt. Chỉ trong ngân sách sugarBudgetMs, hết ngân sách thì
+                // cứ dán để sealTries/d đổ ly xử lý (tránh lặp sugar<->seal vô tận).
+                var chkS2 = document.getElementById('chk-autosugar');
+                if (st.sugarAt && now - st.sugarAt <= CFG.sugarBudgetMs && chkS2 && chkS2.checked) {
+                    var hBack = getHintText();
+                    if (hintSugarPresses(hBack) < st.sugarTarget || hintIceScoops(hBack) < st.iceTarget) {
+                        traceOnce('sealBackSugar', '↩ chưa đủ đường/đá (hint="' + hBack + '", cần đường ' +
+                                  st.sugarTarget + ' / đá ' + st.iceTarget + ') → quay lại bước đường & đá');
+                        setPhase('sugar');
+                        return;
+                    }
+                }
                 if (now - st.phaseAt < CFG.sealDelayMs) return;
                 if (!chkSeal.checked) { st.phase = 'idle'; return; }
                 if (st.sealTries >= CFG.maxSealTries) {
                     st.restarts = (st.restarts || 0) + 1;
                     traceOnce('sealFail', '⚠️ đã thử ' + CFG.maxSealTries + ' cách bấm dán nắp, ly vẫn chưa xong.\n' +
                            '    game đang chờ: "' + (getCoachHint() || '?') + '" | ly: ' + cupSignal() +
+                           ' | #q3hint = "' + getHintText() + '" | toast = "' + getToastText() + '"' +
+                           ' | hộp thoại = ' + (gameModal() ? 'CÓ' : 'không') +
                            ' | topping trong ly: ' + (st.shapesBefore >= 0 ? cupShapeCount() - st.shapesBefore : '?') + ' hình' +
                            ' | topping khách gọi: ' + (getWantedTopBtn() ? topName(getWantedTopBtn()) : 'KHÔNG CÓ') +
                            '\n    → đổ ly này (lần ' + st.restarts + '), KHÔNG bấm topping lại (tránh dồn 2 lớp)');
@@ -1308,6 +1422,13 @@
             L.push('#q3pops children = ' + (document.getElementById('q3pops') ? document.getElementById('q3pops').childElementCount : '?'));
             L.push('hình vẽ trong ly = ' + cupShapeCount() + ' | kiên nhẫn khách = ' + getPatience());
             L.push('game đang chờ = "' + (getCoachHint() || '?') + '"');
+            var dHint = getHintText();
+            L.push('#q3hint = "' + dHint + '" -> đường theo hint = ' + hintSugarPresses(dHint) +
+                   ', đá theo hint = ' + hintIceScoops(dHint));
+            L.push('đường/đá cần (từ đơn) = ' + getSugarPresses(getOrderText()) + ' / ' + getIceScoops(getOrderText()));
+            L.push('#toast = "' + getToastText() + '"');
+            var dModal = gameModal();
+            L.push('hộp thoại game = ' + (dModal ? 'CÓ: "' + String(dModal.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 160) + '"' : 'không'));
             ['q3seal', 'q3trash', 'q3_M', 'q3_L'].forEach(function (id) {
                 var b = document.getElementById(id);
                 L.push('  ' + id + ': ' + (b ? 'class="' + b.className + '"' : 'KHÔNG CÓ'));
