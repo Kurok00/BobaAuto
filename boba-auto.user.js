@@ -56,8 +56,8 @@
         setPriceTargetK: 25,       // giá mặc định mỗi nguyên liệu (nghìn đồng) khi bấm "Đặt giá"
         optimizeEnabled: false,    // bật tối ưu giá tự động mỗi ngày
         optimizeDayLast: 0,        // ngày cuối đã ghi nhận (0 = chưa bao giờ)
-        optimizeServedAtDayStart: 0, // S.served tại đầu ngày (đọc qua injection)
-        optimizeAvgCups: undefined,  // EMA số ly bán/ngày
+        optimizeMoneyAtDayStart: 0, // #hMoney tại đầu ngày (để tính lợi nhuận)
+        optimizeProfitPrev: undefined, // lợi nhuận ngày trước (để so sánh)
         priceStep: 1000,           // bước điều chỉnh mỗi lần (VND/nguyên liệu)
         priceMin: 5000,            // giá tối thiểu mỗi nguyên liệu
         priceCapSafety: 0.8,       // giá ly tối đa = priceCap * 0.8 = 96k
@@ -170,7 +170,7 @@
         chkOptimize.addEventListener('change', function() {
             CFG.optimizeEnabled = chkOptimize.checked;
             CFG.optimizeDayLast = 0;
-            CFG.optimizeAvgCups = undefined;
+            CFG.optimizeProfitPrev = undefined;
             trace(chkOptimize.checked ? '⚡ Tối ưu giá BẬT — mỗi ngày sẽ tự điều chỉnh' : '⚡ Tối ưu giá TẮT');
         });
 
@@ -206,17 +206,6 @@
             applySetPrice(k);
         });
 
-        // đọc S.served từ page scope qua injection
-        function getPageServed() {
-            var el = document.getElementById('__boba_served');
-            if (!el) { el = document.createElement('div'); el.id = '__boba_served'; el.style.display = 'none'; document.body.appendChild(el); }
-            var script = document.createElement('script');
-            script.textContent = '(function(){var e=document.getElementById("__boba_served");if(e)e.textContent=(S.served||0);})();';
-            document.body.appendChild(script); script.remove();
-            var v = parseInt(el.textContent, 10);
-            return isFinite(v) ? v : -1;
-        }
-
         // điều chỉnh giá tất cả nguyên liệu ±step (uniform)
         function adjustPricesBy(step) {
             var maxAllowed = Math.round(CFG.priceCap * CFG.priceCapSafety);
@@ -245,30 +234,37 @@
             script.remove();
         }
 
-        // phát hiện ngày mới, điều chỉnh giá dựa trên số ly bán
+        // tối ưu giá mỗi ngày dựa trên lợi nhuận (#hMoney delta)
         function checkPriceOptimize() {
             if (!CFG.optimizeEnabled) return;
             var curDay = getGameDay();
             if (curDay === CFG.optimizeDayLast) return;
-            var curServed = getPageServed();
-            if (curServed < 0) return;
-            var cupsToday = curServed - CFG.optimizeServedAtDayStart;
+            var moneyNow = readBudget();
+            if (moneyNow === null) { CFG.optimizeDayLast = curDay; return; }
             if (CFG.optimizeDayLast > 0) {
-                var prevCups = CFG.optimizeAvgCups || cupsToday;
-                if (cupsToday > prevCups * 1.15) {
-                    adjustPricesBy(+CFG.priceStep);
-                    trace('⚡ giá ↑ +' + CFG.priceStep + 'đ (ly ' + Math.round(prevCups) + '→' + cupsToday + ')');
-                } else if (cupsToday < prevCups * 0.85) {
-                    adjustPricesBy(-CFG.priceStep);
-                    trace('⚡ giá ↓ −' + CFG.priceStep + 'đ (ly ' + Math.round(prevCups) + '→' + cupsToday + ')');
+                var profitToday = moneyNow - CFG.optimizeMoneyAtDayStart;
+                if (CFG.optimizeProfitPrev !== undefined && CFG.optimizeProfitPrev > 0) {
+                    var pct = (profitToday - CFG.optimizeProfitPrev) / CFG.optimizeProfitPrev;
+                    if (pct > 0.15) {
+                        CFG.priceStep = Math.min(CFG.priceStep * 1.2, CFG.priceCap * 0.03);
+                        adjustPricesBy(CFG.priceStep);
+                        trace('⚡ giá ↑ +' + CFG.priceStep + 'đ (lợi nhuận +' + (pct*100).toFixed(0) + '%: ' + profitToday + 'k)');
+                    } else if (pct < -0.15) {
+                        CFG.priceStep = Math.max(CFG.priceStep * 0.8, 500);
+                        adjustPricesBy(-CFG.priceStep);
+                        trace('⚡ giá ↓ −' + CFG.priceStep + 'đ (lợi nhuận ' + (pct*100).toFixed(0) + '%: ' + profitToday + 'k)');
+                    } else {
+                        trace('⚡ giá giữ (lợi nhuận ' + (pct*100).toFixed(0) + '%: ' + profitToday + 'k)');
+                    }
+                    var lg = document.getElementById('log-optimize');
+                    if (lg) lg.textContent = '⚡ ' + (pct > 0.15 ? '↑' : pct < -0.15 ? '↓' : '→') + ' LN ' + profitToday + 'k | bước ' + Math.round(CFG.priceStep) + 'đ';
                 } else {
-                    trace('⚡ giá giữ (ly ' + Math.round(prevCups) + '→' + cupsToday + ')');
+                    adjustPricesBy(CFG.priceStep);
+                    trace('⚡ THỬ giá +' + CFG.priceStep + 'đ (điều chỉnh lần 1)');
                 }
-                CFG.optimizeAvgCups = (CFG.optimizeAvgCups || 0) * 0.7 + cupsToday * 0.3;
-                var lg = document.getElementById('log-optimize');
-                if (lg) lg.textContent = '⚡ ' + (cupsToday > prevCups * 1.15 ? '↑' : cupsToday < prevCups * 0.85 ? '↓' : '→') + ' ly ' + Math.round(prevCups) + '→' + cupsToday + ' | bước ' + CFG.priceStep + 'đ';
+                CFG.optimizeProfitPrev = profitToday;
             }
-            CFG.optimizeServedAtDayStart = curServed;
+            CFG.optimizeMoneyAtDayStart = moneyNow;
             CFG.optimizeDayLast = curDay;
         }
 
