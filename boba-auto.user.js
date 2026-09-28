@@ -605,7 +605,7 @@
                 sealTries: 0, restarts: 0, declAt: 0,
                 lastCupClick: 0, trashAt: 0, lastPhaseLog: '',
                 spamGuard: {},
-                sugarClicks: 0, iceClicks: 0, sugarTarget: 0, iceTarget: 0
+                sugarClicks: 0, iceClicks: 0, sugarTarget: 0, iceTarget: 0, sugarTargetsRead: false
             };
         }
         var SERVE = freshServe();
@@ -1134,7 +1134,8 @@
                 var iceBtn = document.getElementById('q3b_ice');
                 if (!sugarBtn || !iceBtn) { setPhase('seal'); return; }
 
-                if (st.sugarTarget === 0 && st.iceTarget === 0 && st.sugarClicks === 0 && st.iceClicks === 0) {
+                if (!st.sugarTargetsRead) {
+                    st.sugarTargetsRead = true;
                     st.sugarTarget = getSugarPresses(say);
                     st.iceTarget = getIceScoops(say);
                     st.lastPress = 0;
