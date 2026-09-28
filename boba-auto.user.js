@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260928000003  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
+// @version      20260928000005  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '34.9',
+        appVersion: '35.0',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -61,6 +61,7 @@
         priceStep: 1000,           // bước điều chỉnh mỗi lần (VND/nguyên liệu)
         priceMin: 5000,            // giá tối thiểu mỗi nguyên liệu
         priceCapSafety: 0.8,       // giá ly tối đa = priceCap * 0.8 = 96k
+        tampermonkeyVersion: '20260928000005', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
@@ -84,7 +85,7 @@
 
         var headerEl = document.createElement('div');
         headerEl.style.cssText = 'background:#e74c3c; padding:8px 12px; font-weight:bold; font-size:13px; display:flex; justify-content:space-between; align-items:center;';
-        headerEl.innerHTML = '<span>🧋 Auto Tiệm Trà v' + CFG.appVersion + '</span><button id="mod-close-btn" style="background:none; border:none; color:white; font-weight:bold; cursor:pointer; font-size:14px;">✕</button>';
+        headerEl.innerHTML = '<span>🧋 Auto Tiệm Trà v' + CFG.appVersion + ' <small id="mod-version" style="opacity:0.6">@' + CFG.tampermonkeyVersion + '</small></span> <button id="mod-check-ver" style="background:#2980b9; color:white; border:none; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:11px;">🔄</button><button id="mod-close-btn" style="background:none; border:none; color:white; font-weight:bold; cursor:pointer; font-size:14px;">✕</button>';
         menuEl.appendChild(headerEl);
 
         var row = 'display:flex; align-items:center; gap:8px; font-size:12px;';
@@ -109,7 +110,8 @@
             '<div id="log-setprice" style="font-size:11px; color:#2ecc71; margin-top:2px;"></div>' +
             '<hr style="border:0; border-top:1px solid #27ae60; margin:4px 0;">' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-optimize"><b>⚡ Tối ưu giá mỗi ngày</b></label></div>' +
-            '<div id="log-optimize" style="font-size:11px; color:#2ecc71; margin-top:2px;"></div>';
+            '<div id="log-optimize" style="font-size:11px; color:#2ecc71; margin-top:2px;"></div>' +
+            '<div id="mod-update-status" style="font-size:11px; color:#2ecc71; margin-top:4px; text-align:center; padding:4px 0; border-top:1px solid #27ae60;">✅ Đã biết bản @' + CFG.tampermonkeyVersion + '</div>';
         menuEl.appendChild(bodyEl);
         document.body.appendChild(menuEl);
 
@@ -173,6 +175,28 @@
             CFG.optimizeProfitPrev = undefined;
             trace(chkOptimize.checked ? '⚡ Tối ưu giá BẬT — mỗi ngày sẽ tự điều chỉnh' : '⚡ Tối ưu giá TẮT');
         });
+        document.getElementById('mod-check-ver').addEventListener('click', checkUpdate);
+
+        // kiểm tra bản mới từ GitHub
+        function checkUpdate() {
+            var statusEl = document.getElementById('mod-update-status');
+            if (!statusEl) return;
+            statusEl.textContent = '⏳ Đang kiểm tra...';
+            var script = document.createElement('script');
+            script.textContent = '(function(){fetch("https://raw.githubusercontent.com/Kurok00/BobaAuto/main/boba-auto.user.js").then(function(r){return r.text()}).then(function(t){var m=t.match(/@version\s+(\d+)/);var e=document.getElementById("__boba_remote_version");if(e)e.textContent=m?m[1]:"";}).catch(function(){var e=document.getElementById("__boba_remote_version");if(e)e.textContent="ERR";})})();';
+            document.body.appendChild(script);
+            script.remove();
+            var poll = setInterval(function() {
+                var el = document.getElementById('__boba_remote_version');
+                if (!el) return;
+                var rv = el.textContent.trim();
+                if (!rv || rv === 'ERR') { clearInterval(poll); if (statusEl) statusEl.textContent = '⚠️ Không kết nối được'; return; }
+                clearInterval(poll);
+                var lv = CFG.tampermonkeyVersion;
+                if (rv > lv) { if (statusEl) statusEl.textContent = '⚡ CẬP NHẬT! Remote ' + rv + ' > Local ' + lv; }
+                else { if (statusEl) statusEl.textContent = '✅ MỚI NHẤT (v' + rv + ')'; }
+            }, 500);
+        }
 
         function applySetPrice(targetK) {
             var targetVND = Math.round(Math.max(1, +targetK || CFG.setPriceTargetK) * 1000);
