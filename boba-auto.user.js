@@ -608,7 +608,8 @@
                 lastCupClick: 0, trashAt: 0, lastPhaseLog: '',
                 spamGuard: {},
                 sugarClicks: 0, iceClicks: 0, sugarTarget: 0, iceTarget: 0,
-                sugarAt: 0, sugarTries: 0, iceTries: 0
+                 sugarAt: 0, sugarTries: 0, iceTries: 0,
+                flavPressed: false, flavTries: 0
             };
         }
         var SERVE = freshServe();
@@ -777,6 +778,14 @@
             var mark = z.querySelector('.q3z.q3want[data-a^="top:"]:not(.q3lock)');
             if (mark) return mark;
             return matchByLabel(z, '.q3z[data-a^="top:"]:not(.q3lock)', getOrderText(), null);
+        }
+        // flavor: game đánh dấu .q3want theo đơn (o.flav) -> ưu tiên mark
+        function getWantedFlavBtn() {
+            var z = getZones();
+            if (!z) return null;
+            var mark = z.querySelector('.q3z[data-a^="flav"]:not(.q3lock).q3want');
+            if (mark) return mark;
+            return matchByLabel(z, '.q3z[data-a^="flav"]:not(.q3lock)', getOrderText(), null);
         }
         // chọn nút có aria-label dài nhất mà text đơn hàng chứa nhiều nhất
         function matchByLabel(z, sel, say, stripRe) {
@@ -1195,12 +1204,25 @@
                     st.sugarTries = 0;
                     st.iceTries = 0;
                     st.sugarAt = now;
-                    trace('🧊 đường & đá: nước đường ' + tS + ' lần, xúc đá ' + tI + ' lần | đơn: "' + say + '"');
-                }
+                trace('🧊 đường & đá: nước đường ' + tS + ' lần, xúc đá ' + tI + ' lần | đơn: "' + say + '"');
+            }
 
-                var hint = getHintText();
-                var doneS = hintSugarPresses(hint), doneI = hintIceScoops(hint);
-                if (doneS !== st.sugarClicks || doneI !== st.iceClicks) {
+            // ---- pha SỞ (vị) ---- đơn có vị thì bấm trước khi đường/đá
+            var favBtn = getWantedFlavBtn();
+            if (favBtn && !st.flavPressed) {
+                if (now - st.lastPress > CFG.tapDelayMs) {
+                    triggerFullClick(favBtn);
+                    st.lastPress = now;
+                    st.flavPressed = true;
+                    st.flavTries++;
+                    trace('🍓 bấm siro "' + topName(favBtn) + '"');
+                }
+                return;
+            }
+
+            var hint = getHintText();
+            var doneS = hintSugarPresses(hint), doneI = hintIceScoops(hint);
+            if (doneS !== st.sugarClicks || doneI !== st.iceClicks) {
                     st.sugarClicks = doneS;
                     st.iceClicks = doneI;
                     trace('🍬 game xác nhận: đường ' + doneS + '/' + tS + ' | đá ' + doneI + '/' + tI +
@@ -1222,8 +1244,8 @@
                         st.sugarTries++;
                         triggerFullClick(sugarBtn);
                         st.lastPress = now;
-                        traceOnce('sugarTap', '🍬 bấm nước đường (thử ' + st.sugarTries +
-                                  ', đã vào ly ' + st.sugarClicks + '/' + tS + ')');
+                        trace('🍬 bấm nước đường (thử ' + st.sugarTries +
+                                   ', đã vào ly ' + st.sugarClicks + '/' + tS + ')');
                         if (st.sugarTries > tS + 1) {
                             traceOnce('sugarIgnored', '⚠️ game chưa nhận bấm đường sau ' + st.sugarTries +
                                       ' lần thử | toast="' + getToastText() + '"' +
@@ -1238,8 +1260,8 @@
                         st.iceTries++;
                         triggerFullClick(iceBtn);
                         st.lastPress = now;
-                        traceOnce('iceTap', '🧊 xúc đá (thử ' + st.iceTries +
-                                  ', đã vào ly ' + st.iceClicks + '/' + tI + ')');
+                        trace('🧊 xúc đá (thử ' + st.iceTries +
+                                   ', đã vào ly ' + st.iceClicks + '/' + tI + ')');
                         if (st.iceTries > tI + 1) {
                             traceOnce('iceIgnored', '⚠️ game chưa nhận bấm đá sau ' + st.iceTries +
                                       ' lần thử | toast="' + getToastText() + '"' +
