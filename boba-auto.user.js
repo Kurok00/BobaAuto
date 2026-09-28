@@ -92,7 +92,7 @@
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autoseal" checked><b>5. Dán nắp &amp; giao ly</b></label></div>' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autodecl" checked><b>6. Từ chối đơn hết món (bấm "mời về")</b></label></div>' +
             '<hr style="border:0; border-top:1px solid #34495e; margin:4px 0;">' +
-            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-trace" checked><b>Trace log (tắt khi ổn)</b></label></div>';
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-trace"><b>Trace log (tắt khi ổn)</b></label></div>';
         menuEl.appendChild(bodyEl);
         document.body.appendChild(menuEl);
 
