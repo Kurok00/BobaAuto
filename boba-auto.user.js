@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260928000005  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
+// @version      20260928000006  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '35.0',
+        appVersion: '35.1',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -61,7 +61,7 @@
         priceStep: 1000,           // bước điều chỉnh mỗi lần (VND/nguyên liệu)
         priceMin: 5000,            // giá tối thiểu mỗi nguyên liệu
         priceCapSafety: 0.8,       // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260928000005', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260928000006', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
@@ -1608,5 +1608,3 @@
     if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(initMod, 500);
     else window.addEventListener('DOMContentLoaded', initMod);
 })();
-/ /   t e s t   h o o k  
- 
