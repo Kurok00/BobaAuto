@@ -1,5 +1,12 @@
 # Lịch sử thay đổi
 
+## [35.8] - 2026-09-28
+
+- Mở rộng bộ quét màn Chuẩn bị để lấy input giá menu hiện tại.
+- Ghi các dòng kho gồm tồn, giá vốn, số dùng hôm qua, hạn sử dụng và kế hoạch nhập.
+- Tìm các element có khả năng chứa tổng kết ngày, tuần, tháng, doanh thu và lợi nhuận.
+- Bổ sung trạng thái giờ, tên quán, đánh giá và tiền vào phần `KEY STATE`.
+
 ## [35.7] - 2026-09-28
 
 - Nâng cấp `Quét & Copy Element` thành bộ quét DOM có trọng tâm.

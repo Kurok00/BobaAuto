@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260928171705  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
+// @version      20260928172236  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
 // @description  Tự nhập hàng theo nhu cầu tối đa 2 ly/khách, tự phục vụ đúng trà - topping - đường - đá, tối ưu giá menu, giao diện responsive và chẩn đoán DOM.
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '35.7',
+        appVersion: '35.8',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -58,7 +58,7 @@
         priceMin: 5000, // giá tối thiểu mỗi nguyên liệu
         priceCap: 120000, // trần giá tham chiếu của game (VND)
         priceCapSafety: 0.8, // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260928171705', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260928172236', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
@@ -292,7 +292,7 @@
 
         function collectElementScan() {
             var lines = ['===== ELEMENT SNAPSHOT v2 =====', 'URL=' + location.href, 'time=' + new Date().toISOString()];
-            var stateIds = ['hDay', 'hSub', 'hMoney', 'q3say', 'q3hint', 'q3coach', 'q3cup', 'q3noCup', 'q3b_sugar', 'q3b_ice', 'q3_M', 'q3_L', 'q3seal', 'toast', 'mod-menu'];
+            var stateIds = ['hDay', 'hClk', 'hSub', 'hName', 'hMoney', 'hStars', 'hRate', 'q3say', 'q3hint', 'q3coach', 'q3cup', 'q3noCup', 'q3b_sugar', 'q3b_ice', 'q3_M', 'q3_L', 'q3seal', 'toast', 'mod-menu'];
             lines.push('--- KEY STATE ---');
             for (var s = 0; s < stateIds.length; s++) {
                 var stateEl = document.getElementById(stateIds[s]);
@@ -309,13 +309,13 @@
                     html: shortHtml(stateEl, 320)
                 }));
             }
-            var targetSelectors = ['#q3', '#q3say', '#q3zones', '#q3cup', '#q3hint', '#q3coach', '#toast', '#modal', '#mod-menu', '.tab[data-tab="kho"]', '.tab[data-tab="gia"]'];
+            var targetSelectors = ['#q3', '#q3say', '#q3zones', '#q3cup', '#q3hint', '#q3coach', '#toast', '#modal', '#mod-menu', '#view', '.tab[data-tab="kho"]', '.tab[data-tab="gia"]'];
             var linesByTarget = [];
             var seen = new Set();
             for (var t = 0; t < targetSelectors.length; t++) {
                 var target = document.querySelector(targetSelectors[t]);
                 if (!target) continue;
-                var targetEls = [target].concat(Array.prototype.slice.call(target.querySelectorAll('button, input, select, textarea, [role], [data-a], [data-g], [data-k], [aria-label], img, svg, .q3badge, .q3tag')));
+                var targetEls = [target].concat(Array.prototype.slice.call(target.querySelectorAll('button, input, select, textarea, [role], [data-a], [data-g], [data-k], [aria-label], [data-tab], .rowi, .spage, .sub, .okline, .stat, [class*="summary"], [class*="report"], [class*="stat"], [id*="summary"], [id*="report"], [id*="week"], [id*="month"], img, svg, .q3badge, .q3tag')));
                 for (var e = 0; e < targetEls.length; e++) {
                     var el = targetEls[e];
                     if (!el || el.nodeType !== 1 || seen.has(el)) continue;
@@ -351,6 +351,46 @@
             if (!linesByTarget.length) {
                 lines.push('No targeted game element found. The game may still be on the preparation screen.');
             }
+
+            var prepRoot = document.querySelector('#view') || document.body;
+            var priceInputs = prepRoot.querySelectorAll('input[data-g="sell"]');
+            lines.push('--- PRICE INPUTS (' + priceInputs.length + ') ---');
+            for (var p = 0; p < priceInputs.length; p++) {
+                var priceInput = priceInputs[p];
+                lines.push('price[' + p + '] key=' + JSON.stringify(priceInput.dataset.k || '') +
+                    ' label=' + JSON.stringify(priceInput.getAttribute('aria-label') || '') +
+                    ' value=' + JSON.stringify(priceInput.value || '') +
+                    ' disabled=' + !!priceInput.disabled +
+                    ' html=' + JSON.stringify(shortHtml(priceInput, 260)));
+            }
+
+            var warehouseRows = prepRoot.querySelectorAll('.rowi');
+            lines.push('--- WAREHOUSE ROWS (' + warehouseRows.length + ') ---');
+            for (var w = 0; w < warehouseRows.length; w++) {
+                var warehouseRow = warehouseRows[w];
+                lines.push('row[' + w + '] text=' + JSON.stringify(sanitizeText(warehouseRow.innerText || warehouseRow.textContent || '').slice(0, 300)) +
+                    ' html=' + JSON.stringify(shortHtml(warehouseRow, 360)));
+            }
+
+            var summaryCandidates = [];
+            var summarySeen = new Set();
+            var summaryEls = prepRoot.querySelectorAll('*');
+            for (var q = 0; q < summaryEls.length && summaryCandidates.length < 80; q++) {
+                var summaryEl = summaryEls[q];
+                var summaryText = sanitizeText(summaryEl.textContent || summaryEl.innerText || '');
+                if (!summaryText || summaryText.length > 320 || summarySeen.has(summaryText)) continue;
+                if (!/(ngày|tuần|tháng|doanh|thu nhập|lợi nhuận|lãi|bán|khách|tổng|đánh giá|revenue|profit|summary|report)/i.test(summaryText)) continue;
+                var summaryStyle = window.getComputedStyle ? window.getComputedStyle(summaryEl) : null;
+                if (summaryEl.hidden || (summaryStyle && summaryStyle.display === 'none')) continue;
+                summarySeen.add(summaryText);
+                summaryCandidates.push('summary[' + summaryCandidates.length + '] tag=' + summaryEl.tagName.toLowerCase() +
+                    ' id=' + JSON.stringify(summaryEl.id || '') +
+                    ' class=' + JSON.stringify(summaryEl.className || '') +
+                    ' text=' + JSON.stringify(summaryText) +
+                    ' html=' + JSON.stringify(shortHtml(summaryEl, 360)));
+            }
+            lines.push('--- SUMMARY CANDIDATES (' + summaryCandidates.length + ') ---');
+            lines = lines.concat(summaryCandidates);
             return lines.join('\n');
         }
 
