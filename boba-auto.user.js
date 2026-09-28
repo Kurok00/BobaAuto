@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260928164643  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
+// @version      20260928165206  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -51,14 +51,14 @@
         maxRestarts: 4, // liên tục đổ ly quá số lần thì dừng, báo lỗi
         traceRepeatLimit: 4, // tránh log spam khi máy trạng thái lặp
         cupClickGapMs: 700,
-        sugarRetryMs: 900, // chờ #q3hint cập nhật (animation game ~420ms) rồi mới bấm lại
+        sugarRetryMs: 500, // chờ #q3hint cập nhật rồi bấm lại nhanh hơn animation game ~420ms
         sugarBudgetMs: 10000, // tổng ngân sách bước đường & đá, kể cả khi quay lại từ dán nắp
         setPriceTargetK: 25, // giá mặc định mỗi nguyên liệu (nghìn đồng) khi bấm "Đặt giá"
         priceStep: 1000, // bước điều chỉnh mỗi lần (VND/nguyên liệu)
         priceMin: 5000, // giá tối thiểu mỗi nguyên liệu
         priceCap: 120000, // trần giá tham chiếu của game (VND)
         priceCapSafety: 0.8, // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260928164643', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260928165206', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
@@ -79,6 +79,9 @@
         var menuEl = document.createElement('div');
         menuEl.id = 'mod-menu';
         menuEl.style.cssText = 'position:fixed; top:75px; right:20px; width:255px; background:rgba(44, 62, 80, 0.95); color:#ecf0f1; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.4); font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; z-index:999999; overflow:hidden; border:1px solid #34495e; display:none; flex-direction:column;';
+        var responsiveStyle = document.createElement('style');
+        responsiveStyle.textContent = '#mod-menu{max-width:calc(100vw - 20px);max-height:calc(100vh - 20px);box-sizing:border-box}#mod-menu button,#mod-menu label{min-width:0}#mod-menu b{overflow-wrap:anywhere}#price-summary{max-width:calc(100vw - 16px);box-sizing:border-box;white-space:pre-line}@media(max-width:430px){#mod-menu{width:min(320px,calc(100vw - 20px))!important}#price-summary{width:calc(100vw - 20px)!important}}@media(min-width:431px) and (max-width:700px){#mod-menu{width:min(320px,calc(100vw - 20px))!important}}';
+        document.head.appendChild(responsiveStyle);
 
         var headerEl = document.createElement('div');
         headerEl.style.cssText = 'background:#e74c3c; padding:8px 12px; font-weight:bold; font-size:13px; display:flex; justify-content:space-between; align-items:center;';
@@ -138,25 +141,50 @@
             var dx = cx - startX,
                 dy = cy - startY;
             if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasMoved = true;
-            iconEl.style.left = Math.max(5, Math.min(window.innerWidth - 50, initialLeft + dx)) + 'px';
-            iconEl.style.top = Math.max(5, Math.min(window.innerHeight - 50, initialTop + dy)) + 'px';
+            var viewport = getViewportSize();
+            iconEl.style.left = Math.max(5, Math.min(viewport.width - 50, initialLeft + dx)) + 'px';
+            iconEl.style.top = Math.max(5, Math.min(viewport.height - 50, initialTop + dy)) + 'px';
             if (menuEl.style.display === 'flex') updateMenuPos(initialLeft + dx, initialTop + dy);
         }
 
         function onPointerUp() { isDragging = false; }
 
         function updateMenuPos(iLeft, iTop) {
-            menuEl.style.left = Math.max(10, Math.min(window.innerWidth - 260, iLeft - 185)) + 'px';
-            menuEl.style.top = (iTop + 52 > window.innerHeight - 210 ? iTop - 160 : iTop + 52) + 'px';
+            var viewport = getViewportSize();
+            if (viewport.width <= 430) menuEl.style.width = Math.min(320, viewport.width - 20) + 'px';
+            else if (viewport.width <= 700) menuEl.style.width = Math.min(320, viewport.width - 20) + 'px';
+            else menuEl.style.width = '255px';
+            var menuWidth = menuEl.getBoundingClientRect().width || 255;
+            var menuHeight = menuEl.getBoundingClientRect().height || 300;
+            var left = viewport.width <= 700 ? iLeft - (menuWidth / 2) + 23 : iLeft - 185;
+            var top = iTop + 52;
+            if (top + menuHeight > viewport.height - 10) top = iTop - menuHeight - 8;
+            menuEl.style.left = Math.max(10, Math.min(viewport.width - menuWidth - 10, left)) + 'px';
+            menuEl.style.top = Math.max(10, Math.min(viewport.height - menuHeight - 10, top)) + 'px';
             menuEl.style.right = 'auto';
             positionPriceSummary();
+        }
+
+        function getViewportSize() {
+            var viewport = window.visualViewport;
+            return {
+                width: viewport ? viewport.width : window.innerWidth,
+                height: viewport ? viewport.height : window.innerHeight
+            };
         }
 
         function positionPriceSummary() {
             if (!priceSummaryEl || priceSummaryEl.style.display === 'none') return;
             var rect = menuEl.getBoundingClientRect();
-            priceSummaryEl.style.left = Math.max(8, Math.min(window.innerWidth - 228, rect.right + 8)) + 'px';
-            priceSummaryEl.style.top = Math.max(8, Math.min(window.innerHeight - 90, rect.top)) + 'px';
+            var viewport = getViewportSize();
+            var summaryWidth = viewport.width <= 700 ? Math.min(320, viewport.width - 20) : 220;
+            var hasSideSpace = viewport.width > 700 && rect.right + summaryWidth + 8 <= viewport.width - 8;
+            var left = hasSideSpace ? rect.right + 8 : rect.left;
+            var top = hasSideSpace ? rect.top : rect.bottom + 8;
+            if (!hasSideSpace && top + 90 > viewport.height - 8) top = Math.max(8, rect.top - 90 - 8);
+            priceSummaryEl.style.width = summaryWidth + 'px';
+            priceSummaryEl.style.left = Math.max(8, Math.min(viewport.width - summaryWidth - 8, left)) + 'px';
+            priceSummaryEl.style.top = Math.max(8, Math.min(viewport.height - 90, top)) + 'px';
         }
 
         var priceSummaryTimer;
@@ -189,6 +217,18 @@
         document.getElementById('mod-close-btn').addEventListener('click', function() {
             menuEl.style.display = 'none';
             priceSummaryEl.style.display = 'none';
+        });
+        window.addEventListener('resize', function() {
+            if (menuEl.style.display === 'flex') {
+                var iconRect = iconEl.getBoundingClientRect();
+                updateMenuPos(iconRect.left, iconRect.top);
+            }
+        });
+        if (window.visualViewport) window.visualViewport.addEventListener('resize', function() {
+            if (menuEl.style.display === 'flex') {
+                var iconRect = iconEl.getBoundingClientRect();
+                updateMenuPos(iconRect.left, iconRect.top);
+            }
         });
 
         // ---------------- tự động đặt giá menu ----------------
