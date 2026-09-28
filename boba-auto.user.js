@@ -88,8 +88,9 @@
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autocup" checked><b>1. Lấy ly đúng size</b></label></div>' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autofill" checked><b>2. Rót đúng trà (≥ ' + CFG.pourMinPct + '% mới sang bước sau)</b></label></div>' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autotop" checked><b>3. Thêm topping khách gọi (làm trước khi rót)</b></label></div>' +
-            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autoseal" checked><b>4. Dán nắp &amp; giao ly</b></label></div>' +
-            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autodecl" checked><b>5. Từ chối đơn hết món (bấm "mời về")</b></label></div>' +
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autosugar" checked><b>4. Đường &amp; đá (bấm đúng số lần)</b></label></div>' +
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autoseal" checked><b>5. Dán nắp &amp; giao ly</b></label></div>' +
+            '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autodecl" checked><b>6. Từ chối đơn hết món (bấm "mời về")</b></label></div>' +
             '<hr style="border:0; border-top:1px solid #34495e; margin:4px 0;">' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-trace" checked><b>Trace log (tắt khi ổn)</b></label></div>';
         menuEl.appendChild(bodyEl);
@@ -603,7 +604,8 @@
                 lastTop: 0, topTries: 0, popsBefore: -1, shapesBefore: -1,
                 sealTries: 0, restarts: 0, declAt: 0,
                 lastCupClick: 0, trashAt: 0, lastPhaseLog: '',
-                spamGuard: {}
+                spamGuard: {},
+                sugarClicks: 0, iceClicks: 0, sugarTarget: 0, iceTarget: 0
             };
         }
         var SERVE = freshServe();
@@ -667,6 +669,19 @@
         function getWantedSize(say) {
             var m = say.match(/size\s*([ML])\b/i) || say.match(/ly\s*([ML])\b/i);
             return m ? m[1].toUpperCase() : null;
+        }
+        function getSugarPresses(say) {
+            if (/100%\s*đường/i.test(say)) return 4;
+            if (/70%\s*đường/i.test(say)) return 3;
+            if (/50%\s*đường/i.test(say)) return 2;
+            if (/30%\s*đường/i.test(say)) return 1;
+            return 0;
+        }
+        function getIceScoops(say) {
+            if (/không\s*đá/i.test(say)) return 0;
+            if (/ít\s*đá/i.test(say)) return 1;
+            if (/đá\s*bình\s*thường/i.test(say)) return 2;
+            return 0;
         }
         function getPourPct() {
             var lv = document.getElementById('q3gLv');
@@ -1098,19 +1113,58 @@
             }
 
             releasePour();
-            // rót đạt yêu cầu -> sang dán nắp & giao ly
+            // rót đạt yêu cầu -> sang bước đường & đá
             if (st.phase === 'pour') {
                 if (st.lastPhaseLog !== 'pour-ok') {
                     trace('✅ rót xong ' + pct.toFixed(1) + '% (>= ' + st.target.toFixed(1) + '%)' +
                           ' | hình trong ly=' + cupShapeCount() + ' | kiên nhẫn=' + getPatience() +
-                          ' → chuyển sang dán nắp');
+                          ' → chuyển sang đường & đá');
                     st.lastPhaseLog = 'pour-ok';
                 }
+                setPhase('sugar');
+            }
+
+
+            // ---- 4. ĐƯỜNG & ĐÁ ----
+            if (st.phase === 'sugar') {
+                var chkSugar = document.getElementById('chk-autosugar');
+                if (!chkSugar || !chkSugar.checked) { setPhase('seal'); return; }
+
+                var sugarBtn = document.getElementById('q3b_sugar');
+                var iceBtn = document.getElementById('q3b_ice');
+                if (!sugarBtn || !iceBtn) { setPhase('seal'); return; }
+
+                if (st.sugarClicks === 0 && st.iceClicks === 0) {
+                    st.sugarTarget = getSugarPresses(say);
+                    st.iceTarget = getIceScoops(say);
+                    trace('🧊 đường & đá: bấm nước đường ' + st.sugarTarget + ' lần, xúc đá ' + st.iceTarget + ' lần');
+                }
+
+                var sugarDelay = 350;
+                if (st.sugarClicks < st.sugarTarget) {
+                    if (now - st.lastPress > sugarDelay) {
+                        triggerFullClick(sugarBtn);
+                        st.sugarClicks++;
+                        st.lastPress = now;
+                        trace('🍬 bấm nước đường lần ' + st.sugarClicks + '/' + st.sugarTarget);
+                    }
+                    return;
+                }
+                if (st.iceClicks < st.iceTarget) {
+                    if (now - st.lastPress > sugarDelay) {
+                        triggerFullClick(iceBtn);
+                        st.iceClicks++;
+                        st.lastPress = now;
+                        trace('🧊 xúc đá lần ' + st.iceClicks + '/' + st.iceTarget);
+                    }
+                    return;
+                }
+                trace('✅ đường & đá xong → dán nắp');
                 setPhase('seal');
             }
 
 
-            // ---- 4. DÁN NẮP & GIAO LY ----
+            // ---- 5. DÁN NẮP & GIAO LY ----
             if (st.phase === 'seal') {
                 if (cupSealed()) {
                     trace('✅ ly đã có nắp -> xong 1 ly');
