@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260928000006  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
+// @version      20260928010000  ← BUMP mỗi lần commit để Tampermonkey nhận bản mới
 // @description  Quy hoạch kho theo nhu cầu khách, chặn lỗi 999999k, và tự phục vụ: lấy ly - rót đúng trà - thêm topping - dán nắp giao ly
 // @author       Kurok00
 // @license      MIT
@@ -21,7 +21,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '35.1',
+        appVersion: '35.2',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -61,7 +61,7 @@
         priceStep: 1000,           // bước điều chỉnh mỗi lần (VND/nguyên liệu)
         priceMin: 5000,            // giá tối thiểu mỗi nguyên liệu
         priceCapSafety: 0.8,       // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260928000006', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260928010000', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
@@ -95,6 +95,8 @@
         bodyEl.innerHTML =
             '<button id="btn-prep" style="background:#27ae60; color:white; border:none; padding:8px; border-radius:6px; font-weight:bold; font-size:12px; cursor:pointer; text-align:center;">⚡ Auto Nhập Hàng Thông Minh</button>' +
             '<button id="btn-diag" style="background:#2980b9; color:white; border:none; padding:8px; border-radius:6px; font-weight:bold; font-size:12px; cursor:pointer; text-align:center;">🔍 Chẩn Đoán DOM</button>' +
+            '<button id="btn-scan-copy" style="background:#8e44ad; color:white; border:none; padding:8px; border-radius:6px; font-weight:bold; font-size:12px; cursor:pointer; text-align:center;">📋 Quét &amp; Copy Element</button>' +
+            '<div id="log-scan" style="font-size:11px; color:#2ecc71; margin-top:2px;"></div>' +
             '<hr style="border:0; border-top:1px solid #34495e; margin:4px 0;">' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autocup" checked><b>1. Lấy ly đúng size</b></label></div>' +
             '<div style="' + row + '"><label style="' + lbl + '"><input type="checkbox" id="chk-autofill" checked><b>2. Rót đúng trà (≥ ' + CFG.pourMinPct + '% mới sang bước sau)</b></label></div>' +
@@ -177,6 +179,17 @@
         });
         document.getElementById('mod-check-ver').addEventListener('click', checkUpdate);
 
+        document.getElementById('btn-scan-copy').addEventListener('click', function() {
+            setScanStatus('⏳ Đang quét element...', true);
+            var snapshot = collectElementScan();
+            console.log(snapshot);
+            copyTextToClipboard(snapshot).then(function(ok) {
+                setScanStatus(ok ? '✅ Đã quét và copy xong vào clipboard' : '⚠️ Quét xong nhưng copy bị chặn; xem Console', ok);
+            }, function() {
+                setScanStatus('⚠️ Quét xong nhưng copy bị chặn; xem Console', false);
+            });
+        });
+
         // kiểm tra bản mới từ GitHub
         function checkUpdate() {
             var statusEl = document.getElementById('mod-update-status');
@@ -196,6 +209,88 @@
                 if (rv > lv) { if (statusEl) statusEl.textContent = '⚡ CẬP NHẬT! Remote ' + rv + ' > Local ' + lv; }
                 else { if (statusEl) statusEl.textContent = '✅ MỚI NHẤT (v' + rv + ')'; }
             }, 500);
+        }
+
+        function setScanStatus(msg, ok) {
+            var el = document.getElementById('log-scan');
+            if (!el) return;
+            el.textContent = msg;
+            el.style.color = ok === false ? '#f1c40f' : '#2ecc71';
+        }
+
+        function sanitizeText(v) {
+            return String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+        }
+
+        function shortHtml(el, maxLen) {
+            if (!el) return '';
+            var raw = el.outerHTML || '';
+            return raw.replace(/\s+/g, ' ').slice(0, maxLen || 220);
+        }
+
+        function collectElementScan() {
+            var root = document.body || document.documentElement;
+            var lines = ['===== ELEMENT SNAPSHOT =====', 'URL=' + location.href, 'time=' + new Date().toISOString()];
+            var seen = new Set();
+            var els = Array.prototype.slice.call(root.querySelectorAll('*'));
+            els.unshift(root);
+            var count = 0;
+
+            for (var i = 0; i < els.length && count < 80; i++) {
+                var el = els[i];
+                if (!el || el.nodeType !== 1) continue;
+                if (seen.has(el)) continue;
+                seen.add(el);
+
+                var tag = (el.tagName || '').toLowerCase();
+                if (!tag) continue;
+                var id = el.getAttribute ? el.getAttribute('id') : '';
+                var role = el.getAttribute ? el.getAttribute('role') : '';
+                var attrs = [];
+                if (el.attributes) {
+                    for (var a = 0; a < el.attributes.length; a++) {
+                        var at = el.attributes[a];
+                        if (/^data-|^aria-|^id$|^class$|^role$|^type$|^value$|^href$|^src$/.test(at.name)) {
+                            attrs.push(at.name + '=' + JSON.stringify(String(at.value).slice(0, 60)));
+                        }
+                    }
+                }
+                var text = sanitizeText(el.textContent || el.innerText || '');
+                var hidden = (el.hidden === true) || (el.style && el.style.display === 'none') || (el.getAttribute && el.getAttribute('aria-hidden') === 'true');
+                if (hidden && !id && !role && !attrs.length && !text) continue;
+                var important = !!(id || role || attrs.length || /button|input|textarea|select|a|label|img|svg|div|span|main|header|section|nav|aside|button|td|th|li|p|h1|h2|h3/.test(tag));
+                if (!important) continue;
+                if (text.length > 200) text = text.slice(0, 200) + '...';
+                var label = '[' + tag + ']';
+                if (id) label += ' id=' + id;
+                if (role) label += ' role=' + role;
+                if (attrs.length) label += ' attrs=' + attrs.slice(0, 3).join(', ');
+                lines.push(label + ' text=' + JSON.stringify(text) + ' html=' + JSON.stringify(shortHtml(el, 180)));
+                count++;
+            }
+
+            if (lines.length <= 3) {
+                lines.push('No visible element found.');
+            }
+            return lines.join('\n');
+        }
+
+        function copyTextToClipboard(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                return navigator.clipboard.writeText(text).then(function() { return true; }).catch(function() { return false; });
+            }
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            ta.style.top = '-9999px';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            var ok = false;
+            try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+            ta.remove();
+            return Promise.resolve(ok);
         }
 
         function applySetPrice(targetK) {
