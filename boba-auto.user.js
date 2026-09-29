@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260929130100
+// @version      20260929140000
 // BUMP version mỗi lần commit để Tampermonkey nhận bản mới.
 // @description  Tự nhập hàng theo nhu cầu tối đa 2 ly/khách, tự phục vụ đúng trà - topping - đường - đá, tối ưu giá menu, giao diện responsive và chẩn đoán DOM.
 // @author       Kurok00
@@ -61,7 +61,7 @@
         priceMin: 5000, // giá tối thiểu mỗi nguyên liệu
         priceCap: 120000, // trần giá tham chiếu của game (VND)
         priceCapSafety: 0.8, // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260929130100', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260929140000', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
@@ -465,6 +465,38 @@
             return stats;
         }
 
+        function readDayPriceSignal() {
+            var selectors = [
+                '.final', '.kpis', '.crow', '.trow', '.wbox',
+                '[class*="summary"]', '[class*="report"]', '[class*="stat"]',
+                '[id*="summary"]', '[id*="report"]', '[id*="day"]'
+            ];
+            var seen = [],
+                abandoned = 0,
+                source = '';
+            for (var s = 0; s < selectors.length; s++) {
+                var els = document.querySelectorAll(selectors[s]);
+                for (var e = 0; e < els.length; e++) {
+                    var el = els[e];
+                    var style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+                    if (el.hidden || (style && style.display === 'none')) continue;
+                    var text = sanitizeText(el.innerText || el.textContent || '');
+                    if (!text || text.length > 500 || seen.indexOf(text) !== -1) continue;
+                    seen.push(text);
+                    if (!/(bỏ\s*(?:về|đi)|rời\s*đi|không\s*mua|chê\s*giá|left|walked\s*away)/i.test(text)) continue;
+                    var match = /(\d+)\s*(?:khách\s*)?(?:bỏ\s*(?:về|đi)|rời\s*đi|không\s*mua|chê\s*giá|left|walked\s*away)/i.exec(text) ||
+                        /(?:bỏ\s*(?:về|đi)|rời\s*đi|không\s*mua|chê\s*giá|left|walked\s*away)[^\d]{0,30}(\d+)/i.exec(text);
+                    if (!match) continue;
+                    var count = parseInt(match[1] || match[2], 10);
+                    if (isFinite(count) && count > abandoned) {
+                        abandoned = count;
+                        source = text;
+                    }
+                }
+            }
+            return { abandoned: abandoned, source: source };
+        }
+
         function readPriceCostVND(input) {
             var row = input && input.closest ? input.closest('.rowi') : null;
             var costEl = row ? row.querySelector('.sub') : null;
@@ -481,9 +513,11 @@
             return Math.max(CFG.priceMinStep, Math.round(raw / CFG.priceMinStep) * CFG.priceMinStep);
         }
 
-        function applyDemandPrices(stats) {
+        function applyDemandPrices(stats, priceSignal) {
             var inputs = document.querySelectorAll('input[data-g="sell"][data-k]');
             var changes = [];
+            var abandoned = priceSignal && priceSignal.abandoned ? priceSignal.abandoned : 0;
+            var abandonFactor = abandoned ? Math.min(1, 0.5 + (abandoned - 1) * 0.1) : 0;
             for (var i = 0; i < inputs.length; i++) {
                 var input = inputs[i];
                 var label = normalizePriceName(input.getAttribute('aria-label') || input.dataset.k);
@@ -508,9 +542,10 @@
                 } else {
                     delta = used >= 10 ? priceDeltaByCost(costVND, 1) : (used <= 2 ? -priceDeltaByCost(costVND, 0.5) : 0);
                 }
+                if (abandonFactor) delta -= priceDeltaByCost(costVND, abandonFactor * 0.5);
                 if (delta) changes.push({ key: input.dataset.k, delta: delta, used: used, signal: signal || 'không rõ', costVND: costVND });
             }
-            if (!changes.length) return { count: 0, up: 0, down: 0 };
+            if (!changes.length) return { count: 0, up: 0, down: 0, abandoned: abandoned };
             var priceSummary = {
                 count: changes.length,
                 up: changes.filter(function(change) { return change.delta > 0; }).length,
@@ -538,6 +573,7 @@
             script.textContent = code;
             document.body.appendChild(script);
             script.remove();
+            priceSummary.abandoned = abandoned;
             return priceSummary;
         }
 
@@ -553,16 +589,26 @@
             optimizeBusy = true;
             try {
                 var stats = await collectYesterdayDemand();
+                var summaryTab = document.querySelector(
+                    '.tab[data-tab="tongket"], .tab[data-tab="thongke"], .tab[data-tab="summary"], .tab[data-tab="report"], ' +
+                    '[data-tab="tongket"], [data-tab="thongke"], [data-tab="summary"], [data-tab="report"]'
+                );
+                if (summaryTab) {
+                    triggerFullClick(summaryTab);
+                    await sleep(250);
+                }
+                var priceSignal = readDayPriceSignal();
                 var giaTab = document.querySelector('.tab[data-tab="gia"]');
                 if (giaTab) {
                     triggerFullClick(giaTab);
                     await sleep(250);
                 }
-                var changed = applyDemandPrices(stats);
+                var changed = applyDemandPrices(stats, priceSignal);
                 var lg = document.getElementById('log-optimize');
-                if (lg) lg.textContent = '⚡ Ngày ' + curDay + ': đã chỉnh ' + changed.count + ' mục';
-                showPriceSummary('✅ Ngày ' + curDay + ': ' + changed.count + ' món\n↑ Tăng: ' + changed.up + '  ↓ Giảm: ' + changed.down + '\nDựa trên ' + stats.length + ' món đã bán hôm qua.');
-                trace('⚡ đặt giá ngày ' + curDay + ': ' + changed.count + ' mục, dữ liệu ' + stats.length + ' món');
+                var abandonedText = priceSignal.abandoned ? priceSignal.abandoned + ' khách bỏ về' : 'chưa đọc được khách bỏ về';
+                if (lg) lg.textContent = '⚡ Ngày ' + curDay + ': đã chỉnh ' + changed.count + ' mục | ' + abandonedText;
+                showPriceSummary('✅ Ngày ' + curDay + ': ' + changed.count + ' món\n↑ Tăng: ' + changed.up + '  ↓ Giảm: ' + changed.down + '\nKhách bỏ về: ' + abandonedText + '\nDựa trên ' + stats.length + ' món đã bán hôm qua.');
+                trace('⚡ đặt giá ngày ' + curDay + ': ' + changed.count + ' mục, dữ liệu ' + stats.length + ' món, ' + abandonedText);
             } catch (err) {
                 console.warn('[BobaAuto] Không tối ưu được giá ngày ' + curDay + ':', err);
                 showPriceSummary('❌ Không đặt được giá. Xem Console để biết chi tiết.');
