@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260929140000
+// @version      20260929150000
 // BUMP version mỗi lần commit để Tampermonkey nhận bản mới.
 // @description  Tự nhập hàng theo nhu cầu tối đa 2 ly/khách, tự phục vụ đúng trà - topping - đường - đá, tối ưu giá menu, giao diện responsive và chẩn đoán DOM.
 // @author       Kurok00
@@ -61,8 +61,10 @@
         priceMin: 5000, // giá tối thiểu mỗi nguyên liệu
         priceCap: 120000, // trần giá tham chiếu của game (VND)
         priceCapSafety: 0.8, // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260929140000', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260929150000', // @version hiện tại (bump cùng @version header)
     };
+
+    var SCRIPT_UPDATE_URL = 'https://raw.githubusercontent.com/Kurok00/BobaAuto/main/boba-auto.user.js';
 
     function initMod() {
         if (document.getElementById('mod-menu')) {
@@ -265,25 +267,24 @@
             var statusEl = document.getElementById('mod-update-status');
             if (!statusEl) return;
             statusEl.textContent = '⏳ Đang kiểm tra...';
-            var script = document.createElement('script');
-            script.textContent = '(function(){fetch("https://raw.githubusercontent.com/Kurok00/BobaAuto/f60a4b21c064b8d56457d23a030a344f43b17c56/boba-auto.user.js").then(function(r){return r.text()}).then(function(t){var m=t.match(/@version\s+(\d+)/);var e=document.getElementById("__boba_remote_version");if(e)e.textContent=m?m[1]:"";}).catch(function(){var e=document.getElementById("__boba_remote_version");if(e)e.textContent="ERR";})})();';
-            document.body.appendChild(script);
-            script.remove();
-            var poll = setInterval(function() {
-                var el = document.getElementById('__boba_remote_version');
-                if (!el) return;
-                var rv = el.textContent.trim();
-                if (!rv || rv === 'ERR') { clearInterval(poll); if (statusEl) statusEl.textContent = '⚠️ Không kết nối được'; return; }
-                clearInterval(poll);
+            fetch(SCRIPT_UPDATE_URL, { cache: 'no-store' }).then(function(response) {
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return response.text();
+            }).then(function(text) {
+                var m = /@version\s+(\d+)/.exec(text);
+                var rv = m ? m[1] : '';
+                if (!rv) throw new Error('Không tìm thấy @version');
                 var lv = CFG.tampermonkeyVersion;
                 if (rv > lv) { if (statusEl) statusEl.textContent = '⚡ CẬP NHẬT! Remote ' + rv + ' > Local ' + lv; } else { if (statusEl) statusEl.textContent = '✅ MỚI NHẤT (v' + rv + ')'; }
-            }, 500);
+            }).catch(function() {
+                if (statusEl) statusEl.textContent = '⚠️ Không kết nối được';
+            });
         }
 
         function openScriptUpdate() {
             var statusEl = document.getElementById('mod-update-status');
             if (statusEl) statusEl.textContent = '⬆️ Đang mở trình cập nhật Tampermonkey...';
-            window.open('https://raw.githubusercontent.com/Kurok00/BobaAuto/f60a4b21c064b8d56457d23a030a344f43b17c56/boba-auto.user.js', '_blank', 'noopener');
+            window.open(SCRIPT_UPDATE_URL, '_blank', 'noopener');
         }
 
         function setScanStatus(msg, ok) {
