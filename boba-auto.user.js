@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260928180036
+// @version      20260929120000
 // BUMP version mỗi lần commit để Tampermonkey nhận bản mới.
 // @description  Tự nhập hàng theo nhu cầu tối đa 2 ly/khách, tự phục vụ đúng trà - topping - đường - đá, tối ưu giá menu, giao diện responsive và chẩn đoán DOM.
 // @author       Kurok00
@@ -11,8 +11,8 @@
 // @run-at       document-idle
 // @homepageURL  https://github.com/Kurok00/BobaAuto
 // @supportURL   https://github.com/Kurok00/BobaAuto/issues
-// @updateURL    https://raw.githubusercontent.com/Kurok00/BobaAuto/37d00a1/boba-auto.user.js
-// @downloadURL  https://raw.githubusercontent.com/Kurok00/BobaAuto/37d00a1/boba-auto.user.js
+// @updateURL    https://raw.githubusercontent.com/Kurok00/BobaAuto/f60a4b21c064b8d56457d23a030a344f43b17c56/boba-auto.user.js
+// @downloadURL  https://raw.githubusercontent.com/Kurok00/BobaAuto/f60a4b21c064b8d56457d23a030a344f43b17c56/boba-auto.user.js
 // ==/UserScript==
 
 (function() {
@@ -22,7 +22,7 @@
         // ---------- hiển thị ----------
         // @name và @namespace PHẢI cố định, nếu không Tampermonkey sẽ cài bản sao mới
         // thay vì update bản cũ. Nên version hiển thị nằm ở đây, bump cùng @version.
-        appVersion: '40.1',
+        appVersion: '40.2',
 
         // ---------- kho ----------
         fallbackBudget: 50,
@@ -52,7 +52,7 @@
         maxRestarts: 4, // liên tục đổ ly quá số lần thì dừng, báo lỗi
         traceRepeatLimit: 4, // tránh log spam khi máy trạng thái lặp
         cupClickGapMs: 700,
-        sugarRetryMs: 500, // chờ #q3hint cập nhật rồi bấm lại nhanh hơn animation game ~420ms
+        sugarRetryMs: 420, // chờ #q3hint cập nhật rồi bấm lại ngay sau animation game ~420ms
         sugarBudgetMs: 10000, // tổng ngân sách bước đường & đá, kể cả khi quay lại từ dán nắp
         setPriceTargetK: 25, // giá mặc định mỗi nguyên liệu (nghìn đồng) khi bấm "Đặt giá"
         priceStep: 1000, // bước điều chỉnh mỗi lần (VND/nguyên liệu)
@@ -61,7 +61,7 @@
         priceMin: 5000, // giá tối thiểu mỗi nguyên liệu
         priceCap: 120000, // trần giá tham chiếu của game (VND)
         priceCapSafety: 0.8, // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260928180036', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260929120000', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
@@ -266,7 +266,7 @@
             if (!statusEl) return;
             statusEl.textContent = '⏳ Đang kiểm tra...';
             var script = document.createElement('script');
-            script.textContent = '(function(){fetch("https://raw.githubusercontent.com/Kurok00/BobaAuto/37d00a1/boba-auto.user.js").then(function(r){return r.text()}).then(function(t){var m=t.match(/@version\s+(\d+)/);var e=document.getElementById("__boba_remote_version");if(e)e.textContent=m?m[1]:"";}).catch(function(){var e=document.getElementById("__boba_remote_version");if(e)e.textContent="ERR";})})();';
+            script.textContent = '(function(){fetch("https://raw.githubusercontent.com/Kurok00/BobaAuto/f60a4b21c064b8d56457d23a030a344f43b17c56/boba-auto.user.js").then(function(r){return r.text()}).then(function(t){var m=t.match(/@version\s+(\d+)/);var e=document.getElementById("__boba_remote_version");if(e)e.textContent=m?m[1]:"";}).catch(function(){var e=document.getElementById("__boba_remote_version");if(e)e.textContent="ERR";})})();';
             document.body.appendChild(script);
             script.remove();
             var poll = setInterval(function() {
@@ -283,7 +283,7 @@
         function openScriptUpdate() {
             var statusEl = document.getElementById('mod-update-status');
             if (statusEl) statusEl.textContent = '⬆️ Đang mở trình cập nhật Tampermonkey...';
-            window.open('https://raw.githubusercontent.com/Kurok00/BobaAuto/37d00a1/boba-auto.user.js', '_blank', 'noopener');
+            window.open('https://raw.githubusercontent.com/Kurok00/BobaAuto/f60a4b21c064b8d56457d23a030a344f43b17c56/boba-auto.user.js', '_blank', 'noopener');
         }
 
         function setScanStatus(msg, ok) {
@@ -322,13 +322,13 @@
                     html: shortHtml(stateEl, 320)
                 }));
             }
-            var targetSelectors = ['#q3', '#q3say', '#q3zones', '#q3cup', '#q3hint', '#q3coach', '#toast', '#modal', '#mod-menu', '#view', '.tab[data-tab="kho"]', '.tab[data-tab="gia"]'];
+            var targetSelectors = ['#q3', '#q3say', '#q3zones', '#q3cup', '#q3hint', '#q3coach', '#toast', '#modal', '#mod-menu', '#view', '.tab[data-tab="kho"]', '.tab[data-tab="gia"]', '.tab[data-tab="tongket"]', '.rev.bad', '.rev', '.kpis', '.final', '.crow', '.trow', '.wbox', '.pnav', '.chip[data-sm]'];
             var linesByTarget = [];
             var seen = new Set();
             for (var t = 0; t < targetSelectors.length; t++) {
                 var target = document.querySelector(targetSelectors[t]);
                 if (!target) continue;
-                var targetEls = [target].concat(Array.prototype.slice.call(target.querySelectorAll('button, input, select, textarea, [role], [data-a], [data-g], [data-k], [aria-label], [data-tab], .rowi, .spage, .sub, .okline, .stat, [class*="summary"], [class*="report"], [class*="stat"], [id*="summary"], [id*="report"], [id*="week"], [id*="month"], img, svg, .q3badge, .q3tag')));
+                var targetEls = [target].concat(Array.prototype.slice.call(target.querySelectorAll('button, input, select, textarea, [role], [data-a], [data-g], [data-k], [data-sm], [aria-label], [data-tab], .rowi, .spage, .sub, .okline, .stat, .rev, .kpis, .final, .crow, .trow, .wbox, .pnav, .chip, [class*="summary"], [class*="report"], [class*="stat"], [id*="summary"], [id*="report"], [id*="week"], [id*="month"], img, svg, .q3badge, .q3tag')));
                 for (var e = 0; e < targetEls.length; e++) {
                     var el = targetEls[e];
                     if (!el || el.nodeType !== 1 || seen.has(el)) continue;
@@ -392,7 +392,7 @@
                 var summaryEl = summaryEls[q];
                 var summaryText = sanitizeText(summaryEl.textContent || summaryEl.innerText || '');
                 if (!summaryText || summaryText.length > 320 || summarySeen.has(summaryText)) continue;
-                if (!/(ngày|tuần|tháng|doanh|thu nhập|lợi nhuận|lãi|bán|khách|tổng|đánh giá|revenue|profit|summary|report)/i.test(summaryText)) continue;
+                if (!/(ngày|tuần|tháng|doanh|thu nhập|lợi nhuận|lãi|bán|khách|bỏ|về|đắt|giá cao|tổng|đánh giá|revenue|profit|summary|report)/i.test(summaryText)) continue;
                 var summaryStyle = window.getComputedStyle ? window.getComputedStyle(summaryEl) : null;
                 if (summaryEl.hidden || (summaryStyle && summaryStyle.display === 'none')) continue;
                 summarySeen.add(summaryText);

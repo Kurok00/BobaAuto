@@ -1,5 +1,10 @@
 # Lịch sử thay đổi
 
+## [40.2] - 2026-09-29
+
+- Giảm khoảng chờ giữa các lần click đường/đá từ 500ms xuống 420ms, bám sát thời gian game cập nhật `#q3hint`.
+- Vẫn chỉ click tiếp sau khi đọc lại tiến độ thực tế, tránh click dư khi game chưa nhận thao tác.
+
 ## [40.1] - 2026-09-28
 
 - Thêm nút copy toàn bộ HTML hiện tại của webpage.
