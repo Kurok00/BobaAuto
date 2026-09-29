@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260929130000
+// @version      20260929130100
 // BUMP version mỗi lần commit để Tampermonkey nhận bản mới.
 // @description  Tự nhập hàng theo nhu cầu tối đa 2 ly/khách, tự phục vụ đúng trà - topping - đường - đá, tối ưu giá menu, giao diện responsive và chẩn đoán DOM.
 // @author       Kurok00
@@ -11,8 +11,8 @@
 // @run-at       document-idle
 // @homepageURL  https://github.com/Kurok00/BobaAuto
 // @supportURL   https://github.com/Kurok00/BobaAuto/issues
-// @updateURL    https://raw.githubusercontent.com/Kurok00/BobaAuto/f60a4b21c064b8d56457d23a030a344f43b17c56/boba-auto.user.js
-// @downloadURL  https://raw.githubusercontent.com/Kurok00/BobaAuto/f60a4b21c064b8d56457d23a030a344f43b17c56/boba-auto.user.js
+// @updateURL    https://raw.githubusercontent.com/Kurok00/BobaAuto/main/boba-auto.user.js
+// @downloadURL  https://raw.githubusercontent.com/Kurok00/BobaAuto/main/boba-auto.user.js
 // ==/UserScript==
 
 (function() {
@@ -61,7 +61,7 @@
         priceMin: 5000, // giá tối thiểu mỗi nguyên liệu
         priceCap: 120000, // trần giá tham chiếu của game (VND)
         priceCapSafety: 0.8, // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260929130000', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260929130100', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
