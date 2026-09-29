@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Tiem Tra Nho
 // @namespace    http://tampermonkey.net/
-// @version      20260929120000
+// @version      20260929130000
 // BUMP version mỗi lần commit để Tampermonkey nhận bản mới.
 // @description  Tự nhập hàng theo nhu cầu tối đa 2 ly/khách, tự phục vụ đúng trà - topping - đường - đá, tối ưu giá menu, giao diện responsive và chẩn đoán DOM.
 // @author       Kurok00
@@ -52,7 +52,7 @@
         maxRestarts: 4, // liên tục đổ ly quá số lần thì dừng, báo lỗi
         traceRepeatLimit: 4, // tránh log spam khi máy trạng thái lặp
         cupClickGapMs: 700,
-        sugarRetryMs: 420, // chờ #q3hint cập nhật rồi bấm lại ngay sau animation game ~420ms
+        sugarRetryMs: 300, // giảm khoảng chờ giữa các lần bấm đường/đá, vẫn đủ cho animation cập nhật #q3hint
         sugarBudgetMs: 10000, // tổng ngân sách bước đường & đá, kể cả khi quay lại từ dán nắp
         setPriceTargetK: 25, // giá mặc định mỗi nguyên liệu (nghìn đồng) khi bấm "Đặt giá"
         priceStep: 1000, // bước điều chỉnh mỗi lần (VND/nguyên liệu)
@@ -61,7 +61,7 @@
         priceMin: 5000, // giá tối thiểu mỗi nguyên liệu
         priceCap: 120000, // trần giá tham chiếu của game (VND)
         priceCapSafety: 0.8, // giá ly tối đa = priceCap * 0.8 = 96k
-        tampermonkeyVersion: '20260929120000', // @version hiện tại (bump cùng @version header)
+        tampermonkeyVersion: '20260929130000', // @version hiện tại (bump cùng @version header)
     };
 
     function initMod() {
